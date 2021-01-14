@@ -1,0 +1,349 @@
+---
+title: "Special Tasks"
+author: "Keshav Padiyar Manuru"
+date: "03/01/2021"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r,echo=FALSE,message=FALSE,warning=FALSE}
+library("dplyr")
+library("glmnet")
+library("boot")
+```
+
+# Assignment 1. Variable selection with randomized LASSO
+
+Here we are trying to enhance the chances of right variable selection there by minimizing elemenation of highly correlated variables. As mentioned in the paper \ref https://rss.onlinelibrary.wiley.com/doi/full/10.1111/j.1467-9868.2010.00740.x
+
+The randomized lasso is a new generalization of the lasso. Whereas the lasso penalizes the absolute value $|\beta_k|$ of every component with a penalty term proportional to $\lambda$, the randomized lasso changes the penalty $\lambda$ to a randomly chosen value in the range $[\lambda,\frac{\lambda}{\alpha}]$.
+
+In-order to achieve the said goal following steps are performed:
+
+ 1. Take samples from dataset without replacement using non parametric bootstrap (100 iterations).
+ 2. Generate weights in-order to randomly penalize the $|\beta_k|$. Where weight $W_k$ be IID random variables in $[\alpha,1]$ here $\alpha = 0.5$ and its called as weakness parameter.
+ 
+$$\hat\beta^{\lambda,W}=arg \ min(||Y-X\beta||^{2}_2 + \lambda \sum^{p}_{k=1} \frac{|\beta_k|}{W_k})$$
+ 
+ 3. Run the lasso model with bootstrapped data for every single $\lambda \ \epsilon \ 0.05-1$ over step of 0.05
+also, add above generated weights to the model.
+ 4. For every $\lambda$ value calculate the probability of the significance of the variable. It can be achieved by, assigning the value = 1 all the variables for every iteration whose coefficients are non zero for a given $\lambda$. Then by taking the sum over the variable values and dividing it by total number of iterations we get the probabilities.
+ 5. Repeat the step 4 for all $\lambda$ values, then finally take the maximum probability for all the variables irrespective of $\lambda$
+ 6. Inorder to select the stable variables, we have set the threshold to be **0.7**. Variables with their maximum probability $> 0.7$ are selected as stable variables
+
+## 1. Reading data excluding *total_UPDRS*, scaling to zero and unit variance.
+
+```{r}
+park <- read.csv("parkinsons.csv")
+park <- park %>% select(-total_UPDRS) %>% scale() %>% data.frame()
+lambda <- seq(0.05,1,by=0.05)
+```
+
+## 2. Defining function to implement randomized lasso. 
+
+In the function *f1* glmnet package is used to implement lasso regression with weakness parameter $\alpha=0.5$
+
+
+$$W_k \ be \ IID \ random \  variables \ in [\alpha,1]$$
+
+```{r}
+
+f1 <- function(data,ind,lambda,alpha){
+
+  data1 <- data[ind,]
+
+  x_train <- as.matrix(data1 %>%select(-motor_UPDRS))
+
+  y_train <- data1$motor_UPDRS
+
+  # generating w_k
+  w <- runif(ncol(x_train),alpha,1)
+
+  m1 <- glmnet(x=x_train,y=y_train,lambda=lambda,alpha=1,
+               family = "gaussian", panalty.factor = 1/w)
+
+  return(matrix(as.vector(t(coef(m1))),ncol=ncol(x_train)+1,nrow=1))
+
+}
+
+```
+
+## 3 Executing the model for different values of lambda and on bootstrap samples
+
+```{r}
+
+for (l in 1:length(lambda)){
+
+  m2 <- boot(park, f1, R =100,lambda=lambda[l],alpha=0.5)
+
+  coefs<-m2$t
+
+  if (l ==1){
+
+    max_probabilities <- matrix(colSums
+                                (apply(coefs,2
+                                    ,function(x) ifelse(x!=0,1,0)))/100,nrow=1)
+
+  }else{
+
+    max_probabilities <- rbind(max_probabilities
+                               ,matrix(colSums(apply(coefs,2
+                              ,function(x) ifelse(x!=0,1,0)))/100,nrow=1))
+  }
+
+}
+
+max_probabilities <- max_probabilities[,-1]
+
+rownames(max_probabilities) <- lambda
+
+colnames(max_probabilities) <- colnames(park %>% select(-motor_UPDRS ))
+```
+
+```{r,echo=FALSE}
+
+library(knitr)
+
+kable(max_probabilities, caption = "Probabilities of Vairable Significance for different Lambda values")
+
+```
+```{r}
+max_probabilities <- matrix(apply(max_probabilities,2,max),nrow=1,
+                            dimnames = list("probability",colnames(park %>% select(-motor_UPDRS ))))
+
+stable <- max_probabilities[,which(apply(max_probabilities,2,function(x) x>0.7))]
+
+kable(t(stable), caption = "Stable Variable Set and their Probabilities")
+
+```
+
+\newpage
+
+# Assignment 3. Neural networks
+
+Implementation of Neural networks using back propagation algorithm. The NN has single input and output units with 10 hidden units. Sigmoid $h(a) = \frac{1}{1+e^{-a}}$ and Tanh $h(a) = \tanh(a)$ functions are used as activation functions.
+
+```{r}
+Nnet <- function(a_function){
+  
+  set.seed(1234567890)
+  Var <- runif(50, 0, 10)
+  trva <- data.frame(Var, Sin=sin(Var))
+  tr <- trva[1:25,] # Training
+  va <- trva[26:50,] # Validation
+  
+  
+  # plot(trva)
+  # plot(tr)
+  # plot(va)
+  
+  ##  Initializing Variables
+  
+  w_j <- runif(10, -1, 1) # Input weight
+  b_j <- runif(10, -1, 1) # Input Bias
+  w_k <- runif(10, -1, 1) # Output weight
+  b_k <- runif(1, -1, 1)  # Output bias
+  l_rate <- 1/nrow(tr)^2  # learning rate
+  n_ite = 25000           # Number of Iterations
+  error <- rep(0, n_ite)  # Error in Training
+  error_va <- rep(0, n_ite) # Error in Validation
+  
+  for(i in 1:n_ite) {
+  # error computation: Your code here
+    
+  ## Error Computation for Test
+    
+  a_j <- (as.matrix(tr$Var))%*% (w_j) + 
+    matrix(rep(b_j,nrow(tr)),ncol=length(b_j),byrow=T) # Activations: aj
+  
+  ## Condition to switch the activation functions
+  if (a_function == "sigmoid"){
+      
+        z_j <- 1/(1+exp(-a_j)) # Equation of Sigmoid function
+    
+    }else{
+
+        z_j <- tanh(a_j) # Equation of Tanh function
+        
+    }
+
+  a_k <- (z_j %*% w_k) + 
+    matrix(rep(b_k,nrow(tr)),ncol=length(b_k),byrow=T) # Output Activations: ak 
+
+  error[i] <- sum((tr$Sin - as.numeric(a_k))^2) # Least Square Error in test
+
+
+  ## Error Computation for validation (Same steps as test, used data set va)
+  
+  a_j <- (as.matrix(va$Var))%*% (w_j) + matrix(rep(b_j,nrow(va)),ncol=length(b_j),byrow=T)
+
+  if (a_function == "sigmoid"){
+      
+        z_j <- 1/(1+exp(-a_j))
+    
+    }else{
+
+        z_j <- tanh(a_j)
+        
+    }
+
+  a_k <- (z_j %*% w_k) + matrix(rep(b_k,nrow(va)),ncol=length(b_k),byrow=T)
+
+  error_va[i] <- sum((va$Sin - as.numeric(a_k))^2)
+
+  #cat("i: ", i, ", error: ", error[i]/2, ", error_va: ", error_va[i]/2, "\n")
+
+  #flush.console()
+  
+  for(n in 1:nrow(tr)) {
+    
+    # forward propagation: Your code here
+
+        # Renaming Variables for ease of understanding
+        
+        w_i <- w_j # Input weight
+    
+        w_o <- w_k # Output weight
+    
+        b_i <- b_j  # Input Bias
+    
+        b_o <- b_k # Output Bias
+    
+        x <- tr[n,1] # Training data
+    
+        a_j <-(w_i * x)+ b_i #Input Activations
+    
+    
+      ## Condition to switch the activation functions
+      if (a_function == "sigmoid"){
+          
+            z_j <- 1/(1+exp(-a_j))
+        
+        }else{
+    
+            z_j <- tanh(a_j)
+            
+        }
+    
+        a_k <- (z_j %*% w_o) + b_o # Output activations
+        
+    ## End of  Forward Propagation
+
+    # backward propagation: Your code here
+        
+        y_k <- as.vector(a_k) # For regression output activation is target
+    
+        delta_k <- (as.numeric(y_k-tr[n,2])) # partial derivative wrt output activation
+        
+          if (a_function == "sigmoid"){
+            
+               # Incase of sigmoid function - derivative
+               delta_j <-  (z_j * (1-z_j)) *  (w_o * delta_k) # Partial derivative wrt input avtivation
+            
+          }else{
+              
+              # Incase of sigmoid function - derivative
+              delta_j <-  (1-z_j^2) *  (w_o * delta_k)
+    
+          }
+       
+    
+        E_wi <-delta_j * x # gradient of input weights
+    
+        E_wo <- z_j * delta_k # gradient of output weights
+    
+        w_ni <- w_j - (l_rate * E_wi) # new input weights using stochastic gradient descent method
+    
+        w_no <- w_k - (l_rate * E_wo) # new output weights
+    
+        w_j <- w_ni # replace old weights with new weights
+    
+        w_k <- w_no
+    
+        b_j <- b_i - (l_rate * delta_j) # new input bias using stochastic gradient descent
+        
+        b_k <- b_o - (l_rate * delta_k) # new output bias
+
+
+   }
+
+  }
+    
+    # print final weights and errors
+  cat("Converged Weights and Biases Using ",a_function,"\n")
+  cat("Input Weight: ", w_j,"\n")
+  cat("Input Bias: ",b_j, "\n")
+  cat("Output Weight: ",w_k,"\n")
+  cat("Output Bias: ",b_k,"\n")
+  
+  plot(error/2, ylim=c(0, 5), main = paste0("Train Error vs Validation Error Using ",a_function))
+  points(error_va/2, col = "red")
+  
+  
+  # plot prediction on training data
+  
+  ## predicting the target values using converged weights and biases for training data
+  
+  a_j <- (as.matrix(tr$Var))%*% (w_j) + matrix(rep(b_j,nrow(tr)),ncol=length(b_j),byrow=T)
+  
+  if (a_function == "sigmoid"){
+      
+        z_j <- 1/(1+exp(-a_j))
+    
+    }else{
+
+        z_j <- tanh(a_j)
+        
+    }
+  
+  y_k <- (z_j %*% w_k) + matrix(rep(b_k,nrow(tr)),ncol=length(b_k),byrow=T)
+  
+  pred <- cbind(tr$Var,y_k)
+  
+  plot(pred,col="blue",main=paste0("Training: True vs Predicted using ", a_function))
+  
+  points(tr, col = "red")
+  
+  # plot prediction on validation data
+  
+  ## predicting the target values using converged weights and biases for validation data
+  a_j <- (as.matrix(va$Var))%*% (w_j) + matrix(rep(b_j,nrow(va)),ncol=length(b_j),byrow=T)
+  
+  if (a_function == "sigmoid"){
+      
+        z_j <- 1/(1+exp(-a_j))
+    
+    }else{
+
+        z_j <- tanh(a_j)
+        
+    }
+  
+  y_k <- (z_j %*% w_k) + matrix(rep(b_k,nrow(va)),ncol=length(b_k),byrow=T)
+  
+  pred <- cbind(va$Var,y_k)
+  
+  plot(pred,col="blue",main=paste0("Validation: True vs Predicted using ", a_function))
+  
+  points(va, col = "red")
+
+  
+}
+```
+
+```{r}
+## NN using Sigmoid activation function
+Nnet("sigmoid")
+
+```
+
+```{r}
+## NN using Tanh activation function
+Nnet("Tanh")
+
+```
+From the above graphs we could see that, neural network gives better result when we use $\tanh(a)$ as the activation function. This may be because, the $\tanh()$ function is having a stronger gradient as data is centered around zero hence derivatives are heigher. And also range of $\tanh()$ function is $[-1,1]$ where as the range of $sigmoid()$ function is $[0,1]$

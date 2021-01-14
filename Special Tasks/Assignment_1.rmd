@@ -1,0 +1,121 @@
+---
+title: "Assignment_1"
+author: "Keshav Padiyar Manuru"
+date: "03/01/2021"
+output: pdf_document
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r,echo=FALSE,message=FALSE,warning=FALSE}
+library("dplyr")
+library("glmnet")
+library("boot")
+```
+
+# Assignment 1. Variable selection with randomized LASSO
+
+Here we are trying to enhance the chances of right variable selection there by minimizing elimination of highly correlated variables. As mentioned in the paper (https://rss.onlinelibrary.wiley.com/doi/full/10.1111/j.1467-9868.2010.00740.x)s
+
+The randomized lasso is a new generalization of the lasso. Whereas the lasso penalizes the absolute value $|\beta_k|$ of every component with a penalty term proportional to $\lambda$, the randomized lasso changes the penalty $\lambda$ to a randomly chosen value in the range $[\lambda,\frac{\lambda}{\alpha}]$.
+
+In-order to achieve the said goal following steps are performed:
+
+ 1. Take samples from dataset without replacement using non parametric bootstrap (here 100 iterations).
+ 2. Generate weights in-order to randomly penalize the $|\beta_k|$. Where weight $W_k$ be IID random variables in $[\alpha,1]$ here $\alpha = 0.5$ and its called as weakness parameter.
+ 
+$$\hat\beta^{\lambda,W}=arg \ min(||Y-X\beta||^{2}_2 + \lambda \sum^{p}_{k=1} \frac{|\beta_k|}{W_k})$$
+ 
+ 3. Run the lasso model with bootstrapped data for every single $\lambda \ \epsilon \ 0.05-1$ over step of 0.05
+also, add above generated weights to the model.
+ 4. For every $\lambda$ value calculate the probability of the significance of the variable. It can be achieved by, assigning the value = 1 all the variables for every iteration whose coefficients are non zero for a given $\lambda$. Then by taking the sum over the variable values and dividing it by total number of iterations we get the probabilities.
+ 5. Repeat the step 4 for all $\lambda$ values, then finally take the maximum probability for all the variables irrespective of $\lambda$
+ 6. Inorder to select the stable variables, we have set the threshold to be **0.7**. Variables with their maximum probability $> 0.7$ are selected as stable variables
+
+## 1. Reading data excluding *total_UPDRS*, scaling to zero and unit variance.
+
+```{r}
+park <- read.csv("parkinsons.csv")
+park <- park %>% select(-total_UPDRS) %>% scale() %>% data.frame()
+lambda <- seq(0.05,1,by=0.05)
+```
+
+## 2. Defining function to implement randomized lasso. 
+
+In the function *f1* glmnet package is used to implement lasso regression with weakness parameter $\alpha=0.5$
+
+
+$$W_k \ be \ IID \ random \  variables \ in [\alpha,1]$$
+
+```{r}
+
+f1 <- function(data,ind,lambda,alpha){
+
+  data1 <- data[ind,]
+
+  x_train <- as.matrix(data1 %>%select(-motor_UPDRS))
+
+  y_train <- data1$motor_UPDRS
+
+  # generating w_k
+  w <- runif(ncol(x_train),alpha,1)
+
+  m1 <- glmnet(x=x_train,y=y_train,lambda=lambda,alpha=1,
+               family = "gaussian", panalty.factor = 1/w)
+
+  return(matrix(as.vector(t(coef(m1))),ncol=ncol(x_train)+1,nrow=1))
+
+}
+
+```
+
+## 3 Executing the model for different values of lambda and on bootstrap samples
+
+```{r}
+
+for (l in 1:length(lambda)){
+
+  m2 <- boot(park, f1, R =100,lambda=lambda[l],alpha=0.5)
+
+  coefs<-m2$t
+
+  if (l ==1){
+
+    max_probabilities <- matrix(colSums
+                                (apply(coefs,2
+                                    ,function(x) ifelse(x!=0,1,0)))/100,nrow=1)
+
+  }else{
+
+    max_probabilities <- rbind(max_probabilities
+                               ,matrix(colSums(apply(coefs,2
+                              ,function(x) ifelse(x!=0,1,0)))/100,nrow=1))
+  }
+
+}
+
+max_probabilities <- max_probabilities[,-1]
+
+rownames(max_probabilities) <- lambda
+
+colnames(max_probabilities) <- colnames(park %>% select(-motor_UPDRS ))
+```
+
+```{r,echo=FALSE}
+
+library(knitr)
+
+kable(max_probabilities, caption = "Probabilities of Vairable Significance for different Lambda values")
+
+```
+```{r}
+max_probabilities <- matrix(apply(max_probabilities,2,max),nrow=1,
+                            dimnames = list("probability",colnames(park %>% select(-motor_UPDRS ))))
+
+stable <- max_probabilities[,which(apply(max_probabilities,2,function(x) x>0.7))]
+
+kable(t(stable), caption = "Stable Variable Set and their Probabilities")
+
+```
