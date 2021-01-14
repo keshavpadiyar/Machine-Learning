@@ -1,0 +1,201 @@
+---
+title: "Assignment 2"
+---
+
+# Assignment 2. Mixture models
+
+Your task is to implement the EM algorithm for mixtures of multivariate Bernoulli distributions. Use your implementation to show what happens when your mixture model has too few and too many components, i.e. set K=2,3,4 and compare results. Please provide a short explanation as well.
+
+
+There are 4 steps that need to be implemented in this assignment: E-step, log-likelihood, a break if the log-likelihood doesn't change significantly and the M-step.
+
+
+To compute the E-step one need to compute the posterior distribution $p\left(z_{n k} \mid \boldsymbol{x}_{n}, \boldsymbol{\mu}, \boldsymbol{\pi}\right)$ for all k and n such as: 
+$$
+p\left(z_{n k} \mid \boldsymbol{x}_{n}, \boldsymbol{\mu}, \boldsymbol{\pi}\right)=\frac{p\left(\boldsymbol{z}_{n k}, \boldsymbol{x}_{n} \mid \boldsymbol{\mu}, \boldsymbol{\pi}\right)}{\sum_{k} p\left(z_{n k}, \boldsymbol{x}_{n} \mid \boldsymbol{\mu}, \boldsymbol{\pi}\right)}=\frac{\pi_{k} p\left(\boldsymbol{x}_{n} \mid \boldsymbol{\mu}_{k}\right)}{\sum_{k} \pi_{k} p\left(\boldsymbol{x}_{n} \mid \boldsymbol{\mu}_{k}\right)}
+$$
+The algorithm need some initial values for $\boldsymbol{\pi}$ and $\boldsymbol{\mu}$ for computing the first iteration of the algorithm and repeats and calculates new estimates for $p\left(z_{n k} \mid \boldsymbol{x}_{n}, \boldsymbol{\mu}, \boldsymbol{\pi}\right)$ each iteration.
+
+Where $p(\boldsymbol{x}_n \mid \boldsymbol{\mu}_k)$ is calculated from a Bernoulli distribution such as: 
+
+$$
+p(\boldsymbol{x}_n \mid \boldsymbol{\mu}_k) = \prod_{i} \mu_{k i}^{x_{i}}\left(1-\mu_{k i}\right)^{\left(1-x_{i}\right)} 
+$$
+
+**The code element of the E-step:**
+
+```{r}
+# 2. E-step
+E_step <- function(K,N,pi,mu,x,z){
+for(k in 1:K){
+  for(n in 1:N){    
+  z[n,k] <- pi[k]* prod( ( mu[k,]^x[n,] ) * (1-mu[k,])^(1-x[n,]))
+  }
+} 
+z <- z/rowSums(z)
+return(z)
+}
+```
+
+\newpage 
+
+To calculate the log-likelihood for each iteration the formula is given below:
+$$
+\log p\left(\left\{\boldsymbol{x}_{n}, \boldsymbol{z}_{n}\right\} \mid \boldsymbol{\mu}, \boldsymbol{\pi}\right) = \sum_{n} \sum_{k} z_{n k}\left[\log \pi_{k}+\sum_{i}\left[x_{n i} \log \mu_{k i}+\left(1-x_{n i}\right) \log \left(1-\mu_{k i}\right)\right]\right]
+$$
+
+**The code element of the log-likelihood:**
+```{r}
+# 2. log likelihood
+log_likelihood <- function(N, K,llik, it, z, pi, x, mu){
+for(n in 1:N ){
+  for(k in 1:K){
+    llik[it] <- llik[it] + z[n,k] *  (log(pi[k]) + sum(x[n,] * log(mu[k,]) + (1- x[n,])*log(1- mu[k,])))
+  }
+}
+return(llik)  
+}
+
+```
+
+In the EM algorithm should compute and repeat the iteration process until $\boldsymbol{\pi}$ and $\boldsymbol{\mu}$ does not change. 
+This can be done by calculating the absolute difference between the log-likelihood of the previous iteration and the current, where a minimum change is set. 
+
+**The code element of the minimum change of log-likelihood:**
+```{r, eval=FALSE}
+# 2. break step
+if(it > 1 ){
+  if(( abs(llik[it]- llik[it-1])  < min_change)){
+  break   
+  }
+}
+```
+
+To calculate the new estimation for $\boldsymbol{\pi}$ $\boldsymbol{\mu}$ for each iteration one can implement the following calculation in the M-Step.
+
+$$
+\begin{aligned}
+\pi_{k}^{M L} &=\frac{\sum_{n} p\left(z_{n k} \mid \mathbf{x}_{n}, \boldsymbol{\mu}, \boldsymbol{\pi}\right)}{N} \\
+\mu_{k i}^{M L} &=\frac{\sum_{n} x_{n i} p\left(z_{n k} \mid \mathbf{x}_{n}, \boldsymbol{\mu}, \boldsymbol{\pi}\right)}{\sum_{n} p\left(z_{n k} \mid \mathbf{x}_{n}, \boldsymbol{\mu}, \boldsymbol{\pi}\right)}
+\end{aligned}
+$$
+**The code element of the M-step:**
+
+```{r}
+# 2. M-step
+M_step <- function(z,N,x){
+pi <- colSums(z)/N
+mu <- t(z) %*% x /colSums(z)
+return(list(pi=pi,mu=mu))
+}
+```
+
+\newpage
+The whole Expectation Maximization Algorithm for multivariate Bernoulli is then put together but inside a function that depends on the number of K.
+```{r}
+# 2. EM_algorithm
+EM_algorithm <- function(K){
+# CREATE DATA STEP
+set.seed(1234567890)
+max_it <- 100; min_change <- 0.1; N=1000; D=10
+x <- matrix(nrow=N, ncol=D);true_pi <- vector(length = 3); true_mu <- matrix(nrow=3, ncol=D)
+true_pi=c(1/3, 1/3, 1/3)
+true_mu[1,]=c(0.5,0.6,0.4,0.7,0.3,0.8,0.2,0.9,0.1,1)
+true_mu[2,]=c(0.5,0.4,0.6,0.3,0.7,0.2,0.8,0.1,0.9,0)
+true_mu[3,]=c(0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5)
+# Producing the training data
+for(n in 1:N) {
+  k <- sample(1:3,1,prob=true_pi)
+  for(d in 1:D){
+    x[n,d] <- rbinom(1,1,true_mu[k,d])
+  }
+}
+z <- matrix(nrow=N, ncol=K) # fractional component assignments
+pi <- vector(length = K) # mixing coefficients
+mu <- matrix(nrow=K, ncol=D) # conditional distributions
+llik <- vector(length = max_it) # log likelihood of the EM iterations
+
+# Random initialization of the parameters
+pi <- runif(K,0.49,0.51);pi <- pi / sum(pi)
+for(k in 1:K) {
+mu[k,] <- runif(D,0.49,0.51)
+}
+for(it in 1:max_it) {
+Sys.sleep(0.5)
+# E-step: Computation of the fractional component assignments
+z <- E_step(K=K,N=N,pi=pi,mu=mu,x=x,z=z)
+#Log likelihood computation.
+llik <- log_likelihood(N=N,K=K,llik=llik,it=it,z=z,pi=pi,x=x,mu=mu)
+
+cat("iteration: ", it, "log likelihood: ", llik[it], "\n")
+flush.console() 
+# Stop if the log likelihood has not changed significantly
+if(it > 1 ){
+  if(( abs(llik[it]- llik[it-1])  < min_change)){
+  break   
+  }
+}
+#M-step: ML parameter estimation from the data and fractional component assignments
+pi <- M_step(z=z,N=N,x=x)$pi
+mu <- M_step(z=z,N=N,x=x)$mu
+}
+invisible(list(true_mu = true_mu, true_pi=true_pi,
+          estimated_pi=pi,estimated_mu=mu, likelihood=llik,x=x,z=z))
+}
+
+```
+
+\newpage
+```{r,include=FALSE}
+## Plotting function
+plot_mu <- function(KX){
+par(mar=c(2,4,3,1))
+plot(KX$true_mu[1,], type="o",lty = 2,lwd=4, col="dark blue", ylim=c(0,1),ylab=expression(mu), main= paste("Estimated mean, k = ", nrow(KX$estimated_mu) ))
+points(KX$true_mu[2,], type="o",lty = 2,lwd=4, col="dark red")
+points(KX$true_mu[3,], type="o",lty = 2,lwd=4, col="dark green")
+for(i in 1:nrow(KX$estimated_mu)){
+points(KX$estimated_mu[i,], type="o",lty = 1,lwd=3, col=1+i)
+}
+}
+
+plot_likelihood <- function(KX){
+plot(KX$likelihood[KX$likelihood!=0],xlab="Iteration",ylab="Likelihood", main=paste("Likelihood of",sum(KX$likelihood!=0),"iterations \n in EM-algorithm"))
+}
+
+```
+
+
+
+```{r,results="hide",echo=FALSE}
+KX <- lapply(2:4, function(k){EM_algorithm(K=k)})
+```
+
+The graphs below shows different values at k for the EM-algorithm. Dashed lines are the true distribution and the complete line is the estimated means of $k$ distributions.
+
+```{r,fig.height=7,echo=FALSE}
+par(mfrow=c(3,1),mar=c(0,0,0,0))
+plot_mu(KX[[1]])
+plot_mu(KX[[2]])
+plot_mu(KX[[3]])
+```
+
+From the plots above different values at k are visualized. As seen when two distributions are estimated (k=2) the $\mu$ EM-algorithm tries to fit the ten different means but for only two distributions which differ from the true number of distributions (k=3), in this case one can see that the EM-algorithm appears to underfit compared to the true distributions since one distribution is missing.
+
+As a comparison when three distributions are estimated (k=3) for the EM-algorithm, one can see that a better fit occurs that appear to fit close to the true means, this makes sense since the true number of distributions are three. 
+
+When introducing four distributions for EM-algorithm overfitting occurs, where all true means of the distribution does not get good representation by the new estimation and the EM-algorithm tries to estimate new distributions that doesn't exist.
+
+
+```{r,fig.height=6.5, echo=FALSE}
+par(mfrow=c(3,1))
+plot_likelihood(KX[[1]])
+plot_likelihood(KX[[2]])
+plot_likelihood(KX[[3]])
+
+knitr::kable(data.frame(K=c(2,3,4) ,
+  LogLikelihood= c(KX[[1]]$likelihood[ sum( KX[[1]]$likelihood != 0)],
+    KX[[2]]$likelihood[ sum( KX[[2]]$likelihood != 0)],
+    KX[[3]]$likelihood[ sum( KX[[3]]$likelihood != 0)]) ))
+```
+
+Above the log-likelihood is visualized for each iteration. The table shows the value of the log-likelihood at the last iteration for different k. Although the log-likelihood seems to be at the highest value for $k = 2$ one cannot draw the solution only based on value of the log-likelihood which of the $k$ is the best fit when not taking the consideration of parameters. As seen in the previous plot $k = 3$ which is the true number of distribution will be the desired number of k. Another aspect when comparing models are the starting values, these EM algorithms tend to be sensitive of what starting values, which in this way assignment differ if the seed is changed. 

@@ -1,0 +1,462 @@
+---
+title: "Lab 2 Block 1 Assignment 1"
+output: pdf_document
+header-includes:
+    - \usepackage{bm}
+
+---
+
+```{r setup, include=FALSE}
+### Assignment 1 ###
+knitr::opts_chunk$set(echo = FALSE)
+knitr::opts_chunk$set(message = TRUE)
+library(MASS)
+library(mvtnorm)
+library(nnet)
+```
+
+# Assignment 1
+
+## Background
+
+**R data file “iris” (present in the default R installation) shows the measurements in centimeters of the variables sepal length and width and petal length and width, respectively, for 50 flowers from each of 3 species of iris. The species are Iris setosa, versicolor, and virginica.**
+
+In this assignment, we will perform Linear Discriminant Analysis (LDA) and logarithmic regression on the well-known iris dataset. We load this data conveniently from the R installation.
+
+``` {r data ingestion, echo = FALSE}
+# getting the data
+data <- iris
+target <- data$Species # slicing our target to a separate frame
+features <- data[,1:2] # slicing the two features we are going to use
+```
+
+## Solutions
+
+**1. Make a scatterplot of Sepal Width versus Sepal Length where observations are colored by Species. Do you think that this data is easy to classify by linear discriminant analysis? Motivate your answer.**
+
+See the plot below. From this plot alone, it is evident that there is a lot of overlap wrt two of the classes, however the third one could be easily separated. Without any additional information, it seems hard to find a good separation with just these two variables. The reason for this is that the class centroids/means are close and there seems to be a lot of variance/scatter, making the ratio $\frac{{(\mu_1-\mu_2)}^2}{s_1^2+s_2^2}$ very small no matter the rotation of the discriminator.
+
+
+``` {r descriptive, echo = FALSE, fig.width = 4.5, fig.height = 3.8, fig.align= "center"}
+
+# setting plot parameters
+par(mar = c(4.1, 4.1, 2.5, 2))
+
+# plotting original data
+plot(
+  data$Sepal.Width,
+  data$Sepal.Length,
+  col = data$Species,
+  pch = 20,
+  main = "Original Data",
+  xlab = "Sepal Width",
+  ylab = "Sepal Length",
+  cex.main = 0.9,
+  cex.lab = 0.8,
+  cex.axis = 0.8
+)
+
+```
+
+\newpage
+
+**2. Use basic R functions only to implement Linear Discriminant Analysis between the three species based on variables Sepal Length and Sepal Width:**
+
+**a. Compute mean, covariance matrices (use cov() ) and prior probabilities per class and report them**
+
+
+```{r lda prep, echo = FALSE}
+p <- ncol(features) # number of predictors
+N <- nrow(features) # nobs
+C <- length(levels(target)) # nclasses
+
+mu <- do.call("rbind", by(features, target, colMeans)) # list of mu's for each class and dimension
+s <- by(features, target, cov) # covariance matrices for each class
+pi <- (prop.table(table(target)))  # class probabilities
+
+# output the descpriptives
+message("Means")
+print(mu)
+message("Covariance Matrices")
+print(s)
+message("Prior Probabilities")
+print(pi)
+
+
+```
+
+
+**b. Compute overall (pooled) covariance matrix and report it**
+
+``` {r pooled variance, echo = FALSE}
+# calculating the ppoled covariance matrix
+S <- matrix(0, nrow = p, ncol = p, dimnames = list(colnames(features), colnames(features)))
+for (c in 1:C) {
+  S <- S + matrix(nrow = p, unlist(Map('*',s[c],pi[c]))) # using Map to do list multiplication
+}
+
+message("Pooled Covariance Matrix")
+S
+
+```
+
+
+**c. Report the probabilistic model for the LDA**
+
+The probabilistic model is
+
+$$\bm{x}|y=C_i, \mu_i,\Sigma\sim{N(\mu_i, \Sigma)}$$
+
+and 
+
+$$y|\pi \sim{Multinomial(\pi_1, ..., \pi_K)}$$
+
+where
+
+
+- we assume that $\Sigma_i = \Sigma \space \forall i$
+
+- $\pi_k$ is estimated from the data as $\frac{N_k}{N}$
+
+- $\hat{\mu}_k=\frac{1}{N_k}\sum_{i:y_i=k}x_i$
+
+- $\hat{\bm{\Sigma}}_k=\frac{1}{N_k}\sum_{i:y_i=k}(x_i-\hat{\mu}_k)(x_i-\hat{\mu}_k)^T$
+
+
+
+**d. Compute discriminant functions for each class**
+
+We can compute the estimates for $w$ and $w_0$:
+$$w_{0k}= -\frac{1}{2}\bm{\mu}_k^T \Sigma^{-1} \bm{\mu}_k + log \pi_k$$
+
+and:
+
+$$w_k=\Sigma^{-1}\bm{\mu}_k$$
+
+which gives:
+
+
+``` {r discriminant functions, echo = FALSE}
+
+# function to get LDA coefficients
+lincoef <- function(mu, S, pi, classes = C) {
+  
+  C <- classes
+  w <- matrix(nrow = ncol(mu), ncol = C, dimnames = list(colnames(mu), paste0("w", 1:3)))
+  w0 <- vector(length = C)
+  names(w0) <- paste0("w0", 1:3)
+  
+  # simply translating the equations into code
+  for (c in 1:C) {
+      w0[c] <- -.5 * t(mu[c, ]) %*% solve(S) %*% mu[c, ] + log(as.matrix(pi[c]))
+      w[,c] <- solve(S) %*% mu[c,] 
+  }
+
+  return(list("w0" = w0, "w" = w))
+  
+}
+
+m1 <- lincoef(mu, S, pi)
+
+m1
+
+```
+
+
+The discriminant functions are formed as follows:
+
+$$\delta_k(x)=x^T\Sigma^{-1}\bm{\mu}_k - \frac{1}{2}\bm{\mu}_k^T \Sigma^{-1} \bm{\mu}_k + log \pi_k$$
+
+We can substitute and get the three linear discriminant functions:
+
+$$ \delta_1(x)=w_1^Tx+w_{01} $$
+$$ \delta_2(x)=w_2^Tx+w_{02} $$
+$$ \delta_3(x)=w_3^Tx+w_{03} $$
+
+Together with the coefficients given above. 
+
+
+**e. Compute equations of decision boundaries between classes and report them**
+
+The decision boundaries are obtained where the discriminant functions are equal, simply equating $\delta(1)=\delta(2)=\delta(3)$ pairwise and moving all terms to one side gives us the boundaries. It is then possible to simply calculate the result for a point and make a decision based on the sign of the result.
+
+$(w_1-w_2)x + (w_{01}-w_{02}) = 0$
+
+$(w_1-w_3)x + (w_{01}-w_{03}) = 0$
+
+$(w_2-w_3)x + (w_{02}-w_{03}) = 0$
+
+This can be interpreted: $w_1-w_2$ gives the resulting vector (`r round((m1$w[,1])-(m1$w[,2]),2)`), $x$ is the vector of input features (`r names(features)`), $w_{01}-w_{02}$ is `r round(m1$w0[1]-m1$w0[2],2)` and so on.
+
+These are the computed boundaries:
+
+``` {r boundaries, echo = FALSE}
+# pairwise differences
+b1 <- data.frame(t((m1$w[,1])-(m1$w[,2])), "w0diff" = m1$w0[1]-m1$w0[2])
+b2 <- data.frame(t((m1$w[,1])-(m1$w[,3])), "w0diff" = m1$w0[1]-m1$w0[3])
+b3 <- data.frame(t((m1$w[,2])-(m1$w[,3])), "w0diff" = m1$w0[2]-m1$w0[3])
+b <- round(rbind("d1-d2" = b1, "d1-d3" = b2, "d2-d3" = b3),2)
+colnames(b) <- c("L1_diff", "L2_diff", "Constant_diff")
+b
+```
+
+
+**Do estimated covariance matrices seem to fulfill LDA assumptions?**
+
+Not quite, as we can see the three $\Sigma_k$ differ:
+
+``` {r covariance_matrices, echo = FALSE}
+message("Covariance matrix for species setosa")
+round(s$setosa,2)
+
+message("Covariance matrix for species versicolor")
+round(s$versicolor,2)
+
+message("Covariance matrix for species virginica")
+round(s$virginica,2)
+```
+
+This should give rise to quadratic terms in our computations, indicating that the LDA might not be a great fit for the data. 
+
+**3. Use discriminant functions from step 2 to predict the species from the original data and make a scatterplot of Sepal Length versus Sepal Width in which color shows the predicted Species.** 
+
+To make predictions, we simply input our feature data into the discriminant functions and pick the class of whichever gives the highest discriminant score. The scatterplots below show the predicted values from our own implementation and the one from lda function. The colour of each dot shows the predicted value. Misclassified points are circled with their true class colour.
+
+``` {r predict and plot, echo = FALSE, fig.width = 5, fig.height = 4, fig.align= "center"}
+
+# function to get discriminant scores and predictions
+discriminant <- function(x, coefs) {
+
+  w <- t(as.matrix(coefs$w))
+  w0 <- coefs$w0
+  x <- t(as.matrix(x))
+  d <- matrix(nrow = ncol(x), ncol=length(w0))
+  c_pred <- vector(mode="numeric", length = nrow(d))
+
+  # discriminant scores
+  for (i in 1:nrow(w)) {
+
+    d[,i] <- w[i, ] %*% x + w0[i]
+  }
+
+  # making the predictions according to highest d-score
+  for (n in 1:nrow(d)) {
+    c_pred[n]  <- levels(target)[which.max(d[n,])]
+
+  }
+  
+  results <- list("discriminant scores" = d, "predicted" = c_pred)
+  return(results)
+}
+
+d <- discriminant(features, m1)
+misclassed <- which(target != d$predicted)
+
+# plotting the results
+par(mar = c(4.1, 4.1, 2.5, 2))
+plot(
+  data$Sepal.Width,
+  data$Sepal.Length,
+  col = as.factor(d$predicted),
+  pch = 20,
+  main = "Predicted Classes",
+  xlab = "Sepal Width",
+  ylab = "Sepal Length",
+  cex.main = 0.9,
+  cex.lab = 0.8,
+  cex.axis = 0.8
+)
+# adding circles to display correct class for misclassified points
+points(
+  data$Sepal.Width[misclassed],
+  data$Sepal.Length[misclassed],
+  pch = 1,
+  cex = 1.2,
+  col = as.factor(data$Species[misclassed])
+)
+
+```
+
+**Estimate the misclassification rate of the prediction. Comment on the quality of classification. Afterwards, perform the LDA analysis with lda() function and investigate whether you obtain the same test error by using this package. Should it be same?**
+
+The misclassification rates and confusion matrices are presented below, and are equal for the two methods. The resulting error rate of 0.2 is not very impressive, but considering the overlap of two of the classes, it was to be expected. The same error rate is obtained from the `lda()` method from `MASS` package and the same classification is made as previously for each observation.
+
+The `lda()` method probably does additional checks and possibly corrections like making the covariance matrices spherical. This could *possibly* create a different result under different circumstances. It may also use another method to for the inversion of the covariance matrix. Other than that, there is no randomness or parameter settings that would change the result in this case. 
+
+
+```{r error rates, echo = FALSE, fig.width = 4, fig.height = 3.5, fig.align= "center"}
+# using lda() to train and predict
+m2 <- lda(Species~.,data = data[,-c(3:4)])
+m2_pred <- predict(m2)
+
+# getting and plotting error rates and confusion matrices
+m1_conf <- table("True" = target, "Predicted" = d$predicted)
+m1_err <- 1-(sum(diag(m1_conf))/sum(m1_conf))
+
+m2_conf <- table("True" = target, "Predicted" = m2_pred$class)
+m2_err <- 1-(sum(diag(m2_conf))/sum(m2_conf))
+
+message("Confusion matrix for own LDA implementation")
+m1_conf
+message("Error rate for own LDA implementation")
+m1_err
+
+message("Confusion matrix for lda()")
+m2_conf
+message("Error rate for lda()")
+m2_err
+
+
+```
+
+\newpage
+
+**4. Use Models reported in 2c to generate new data of this kind with the same total number of cases as in the original data (hint: use sample() and rmvnorm() from package mvtnorm). Make a scatterplot of the same kind as in step 1 but for the new data and compare it with the plots for the original and the predicted data. Conclusions?**
+
+The generated data can be seen below. The top left plot depicts data generated without the assumption of equal covariance, while the top right one does make that assumption. Especially for the black class, the assumption of equal covariances produces a more spherical sample than in the original data. Considering our decision boundaries from before (see the predicted values above), we should still see a large misclassification error if we were to use LDA on this data.
+
+``` {r new data, echo = FALSE, fig.width = 7, fig.height = 6}
+# function to generate data
+gen <- function(mu, s, n) {
+  df <- matrix(nrow = n, ncol = ncol(mu) + 1)
+  
+  for (i in 1:nrow(mu)) {
+    k <-
+      seq(i * n / nrow(mu) - (n / nrow(mu) - 1), i * n / nrow(mu), by = 1)
+    
+    # if the covariance matrix is a matrix it means the pooled covariance matrix
+    if (is.matrix(s)) {
+      df[k, 1:2] <- rmvnorm(n = n / nrow(mu),
+                            mean = mu[i,],
+                            sigma = s)
+    } else { # else it is a list of separate covariance matrices
+      df[k, 1:2] <- rmvnorm(n = n / nrow(mu),
+                            mean = mu[i,],
+                            sigma = s[[i]])
+    }
+    df[k, 3] <- i # bringing along the class it was generated from
+  }
+  df
+}
+
+# calling the function for separate covariance matrices
+set.seed(12345)
+new_features1 <- gen(mu, s, nrow(features))
+
+# calling the function for pooled covariance matrix
+set.seed(12345)
+new_features2 <- gen(mu, S, nrow(features))
+
+# plot parameter settings and the plotting
+# main parameter for each plot should give a clue of what it shows
+par(mfrow = c(2, 2), mar = c(2.4, 2.1, 3, 1), cex.main = 0.9,
+  cex.lab = 0.8,
+  cex.axis = 0.8)
+
+plot(
+  new_features1[, 2],
+  new_features1[, 1],
+  col = as.factor(new_features1[, 3]),
+  pch = 20,
+  xlim = c(2, 4.5),
+  ylim = c(4, 8.5),
+  xlab = NA,
+  ylab = NA,
+  main = "Generated w. Non-equal Covariance"
+)
+
+plot(
+  new_features2[, 2],
+  new_features2[, 1],
+  col = as.factor(new_features2[, 3]),
+  pch = 20,
+  xlim = c(2, 4.5),
+  ylim = c(4, 8.5),
+  xlab = NA,
+  ylab = NA,
+  main = "Generated w. Equal Covariance"
+)
+
+plot(
+  data$Sepal.Width,
+  data$Sepal.Length,
+  col = data$Species,
+  xlim = c(2, 4.5),
+  ylim = c(4, 8.5),
+  pch = 20,
+  main = "Original Data"
+)
+
+# lda() method from MASS
+plot(
+  data$Sepal.Width,
+  data$Sepal.Length,
+  col = m2_pred$class,
+  xlim = c(2, 4.5),
+  ylim = c(4, 8.5),
+  pch = 20,
+  main = "Predicted Classes",
+  xlab = "Sepal Width",
+  ylab = "Sepal Length",
+)
+
+
+```
+
+\newpage
+
+**5. Make a similar kind of classification by logistic regression (use function multinom() from nnet package), plot the classified data and compute the misclassification error. Compare these results with the LDA results.**
+
+``` {r logistic regression, echo = FALSE, include = FALSE}
+# training model using multinom() from nnet
+m3 <- multinom(Species~.,data = data[,-c(3:4)])
+m3_pred <- predict(m3)
+
+# calculating errors
+m3_conf <- table("True" = target, "Predicted" = m3_pred)
+m3_err <- 1-(sum(diag(m3_conf))/sum(m3_conf))
+```
+
+``` {r logistic regression2, echo = FALSE, fig.width = 5, fig.height = 4, fig.align= "center"}
+# outputting error rates
+message("Confusion matrix for multinom()")
+m3_conf
+message("Error rate for multinom()")
+m3_err
+
+misclassed <- which(target != m3_pred)
+
+par(mar = c(4.1, 4.1, 2.5, 2))
+# plotting the predictions from multinom()
+plot(
+  data$Sepal.Width,
+  data$Sepal.Length,
+  col = m3_pred,
+  pch = 20,
+  cex.main = 0.9,
+  cex.lab = 0.8,
+  cex.axis = 0.8,
+  main = "Predicted Classes using multinom()",
+  xlab = "Sepal Width",
+  ylab = "Sepal Length"
+)
+
+# with circles for misclassified observations
+points(
+  data$Sepal.Width[misclassed],
+  data$Sepal.Length[misclassed],
+  pch = 1,
+  cex = 1.2,
+  col = as.factor(data$Species[misclassed])
+)
+
+```
+
+These results are slightly better than for the LDA method. Specifically, even the outlier among the black class in the plot above is classified correctly. The main problem is still the large overlap between the green and red classes above, where no linear separation will ever be able to fully separate the classes without error.
+
+```{r cleanup, echo = FALSE, include = FALSE}
+# Cleanup
+rm(list=ls())
+
+##################### END OF ASSIGNMENT 1 #####################
+```

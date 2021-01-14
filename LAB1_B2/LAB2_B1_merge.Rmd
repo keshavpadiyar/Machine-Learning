@@ -1,0 +1,39 @@
+---
+title: "732A99 - Lab 1, block 2 \n Group L4"
+author: "Keshav Padiyar, Jacob Welander & Henrik Olofsson"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output: 
+  pdf_document:
+    toc: yes 
+---
+
+
+# statement of contribution
+
+Keshav Padiyar: Assignment 1
+
+Jacob Welander: Assignment 2
+
+Henrik Olofsson: Assignment 3
+
+\pagebreak
+
+```{r child = 'assignment1.Rmd'}
+```
+
+\pagebreak
+
+```{r child = 'assignment2.Rmd'}
+```
+
+\pagebreak
+
+```{r child = 'assignment3.Rmd'}
+```
+
+\pagebreak
+
+# Code Appendix
+
+```{r ref.label= knitr::all_labels(), echo=TRUE, eval=FALSE}
+```

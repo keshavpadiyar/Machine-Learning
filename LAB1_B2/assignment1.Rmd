@@ -1,0 +1,340 @@
+---
+title: "Assignment 1"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(comment = NA)
+knitr::opts_chunk$set(warning=FALSE)
+knitr::opts_chunk$set(message=FALSE)
+```
+# Assignment 1. Ensemble methods
+
+The task is to classifying Y from X1 and X2, where Y is binary and X1 and X2 continuous. Learn a random forest with 1, 10 and 100 trees. 
+
+```{r, echo=FALSE}
+
+##  Libraries Used
+
+library("randomForest")
+
+library("ggplot2")
+
+library("dplyr")
+
+```
+
+
+```{r, echo=FALSE}
+## Methods Section
+
+#  get_data: Method to generate Train and Test data as per the given condition
+
+get_data <- function(condition){
+
+  x1_train<-runif(100)
+
+  x2_train<-runif(100)
+  
+
+  if (condition == "a"){
+    
+# 1. Classifying Y from X1 and X2: X1<X2 
+    #  using the condition (x1<x2) 
+
+    train<-data.frame(x1 = x1_train,x2 = x2_train,
+                      y = as.factor(as.numeric(x1_train<x2_train)))
+
+    test<-data.frame(x1 = x1_test,x2 = x2_test,
+                     y = as.factor(as.numeric(x1_test<x2_test)))
+
+
+  }else if (condition == "b"){
+
+# 2. Classifying Y from X1 and X2: X1<0.5
+    #  using the condition (x1<0.5)    
+
+    train<-data.frame(x1 = x1_train,x2 = x2_train,
+                      y = as.factor(as.numeric(x1_train<0.5)))
+
+    test<-data.frame(x1 = x1_test,x2 = x2_test,
+                     y = as.factor(as.numeric(x1_test<0.5)))
+
+
+  }else if (condition == "c"){
+
+# 3. Classifying Y from X1 and X2: X1<0.5 & X2<0.5 | X1>0.5 & X2>0.5
+    #  using the condition (x1<&x2 != 0.5)    
+
+    train<-data.frame(x1 = x1_train,x2 = x2_train,
+                      y = as.factor(as.numeric((x1_train<0.5 & x2_train <0.5) |
+
+                                               (x1_train>0.5 & x2_train>0.5))))
+
+    test<-data.frame(x1 = x1_test,x2 = x2_test,
+                     y = as.factor(as.numeric((x1_test<0.5 & x2_test <0.5) |
+
+                                              (x1_test>0.5 & x2_test>0.5))))
+  }
+
+  return (list(train = train, test = test))
+
+}##  End Method get_data
+
+```
+
+```{r, echo=FALSE}
+
+#randomForest_: Method to reuse the randomForest for multiple train and test datasets. 
+# Returns the model object, miscalssification error rates in test and train data.
+
+randomForest_ <- function(ntree, nodesize, train, test){
+
+
+   rf <- randomForest(y~(x1+x2),
+
+                     data = train,
+
+                     ntree = ntree, nodesize = nodesize,
+
+                     #mtry = 2,
+
+                     keep.forest = TRUE
+
+                     )
+  
+  #  Calculating Misclassification Error
+  misclass_train = 1- sum(diag(table(train$y, predict(rf, train))))/nrow(train)
+
+  misclass_test = 1- sum(diag(table(test$y, predict(rf, test))))/nrow(test)
+
+  return(
+
+    list(rf = rf,
+
+         misclass_train = misclass_train,
+
+         misclass_test = misclass_test
+
+         )
+  )
+} ## End Method randomForest_
+
+```
+
+```{r, echo=FALSE}
+# plot_error: Method to plot mean and variances of misclassification error 
+plot_error <-function (data){
+
+  cat("Mean Classification Error: \n")
+
+  data <- data %>% select(
+
+    t1_tr_err,t10_tr_err,t100_tr_err,
+    t1_tes_err,t10_tes_err,t100_tes_err
+  )
+
+  print (colMeans(data[,4:6]))
+
+  # Calculating Error Mean
+  df_mean_error <- data.frame(x = colMeans(data),
+
+              DataSet = c("train", "train", "train", "test", "test", "test"),
+
+              id = c(1,10,100, 1, 10, 100)
+             )
+
+  #  Getting Variance
+  var_ <- c()
+
+  for(i in colnames(data)){
+
+    var_[i]<-c(i = var(data[i]))
+
+  }
+
+  df_mean_error$var <- var_
+
+  cat("\nVarriance in  Classification Error: \n")
+
+  print(var_[4:6])
+
+
+   df_mean_error = dplyr::filter(df_mean_error, DataSet == "test")
+   
+   p1 = ggplot()+geom_point(aes(x = df_mean_error$id, y = df_mean_error$x))+
+        geom_errorbar(aes(x = df_mean_error$id, 
+                          ymin = df_mean_error$x-sqrt(df_mean_error$var),
+                          ymax = df_mean_error$x+sqrt(df_mean_error$var)
+                          ))+
+        geom_line(aes(x=df_mean_error$id ,y=df_mean_error$x,col="red"))+
+        labs( y = "Misclassification Error",
+
+          x = "Number of Trees",
+
+          title = " MisClassification Error Rate in Test")+
+       scale_color_manual(labels = c("Mean MisClassification Error"), values = c("red"))
+
+   
+   print(p1)
+
+ #gridExtra::grid.arrange(p1,p2, p3)
+}# End plot_error
+
+```
+
+
+```{r, echo=FALSE}
+
+# run_model: Method executes randomforest over 1000 datasets.
+
+run_model <- function(N, nodesize, condition){
+
+    i = 1
+
+    df_error = data.frame(
+                  t1_tr_err = as.numeric(), t1_tes_err  = as.numeric(),
+                  t10_tr_err= as.numeric(), t10_tes_err  = as.numeric(),
+                  t100_tr_err  = as.numeric(), t100_tes_err  = as.numeric()
+                        )
+
+    while(i<=N){
+
+      data = get_data(condition)
+
+      train = data$train
+
+      test = data$test
+      
+      if (i==1){
+        
+        plot(test$x1,test$x2, col=(as.numeric(test$y)+1),main = "Test Data",
+             xlab = "X1",ylab = "X2")
+        
+      }
+      
+      rf_object_t1 <- randomForest_(1,nodesize, train, test)
+
+      rf_object_t10 <- randomForest_(10,nodesize, train, test)
+
+      rf_object_t100 <- randomForest_(100,nodesize, train, test)
+
+      df_error <- (rbind(df_error,c(
+
+                 rf_object_t1$misclass_train, rf_object_t1$misclass_test,     
+                 rf_object_t10$misclass_train, rf_object_t10$misclass_test,                         
+                 rf_object_t100$misclass_train, rf_object_t100$misclass_test)
+                   )
+                 )
+      i=i+1
+
+    }
+
+    colnames(df_error) <- c("t1_tr_err","t1_tes_err", "t10_tr_err",
+                            "t10_tes_err","t100_tr_err","t100_tes_err"
+                            )
+    
+    #  graphical representation of mean and variances of misclassification 
+    #error with different number of trees and nodes
+    plot_error(df_error)
+
+    return(
+
+      list(df_error = df_error,
+
+           rf_1 = rf_object_t1,
+
+           rf_10 = rf_object_t10,
+
+           rf_100 = rf_object_t100)
+
+        )
+} ## End un_model
+
+##  End of Methods Section
+```
+
+```{r,echo=FALSE}
+## Defining Test Data
+
+set.seed(1234)
+
+x1_test<-runif(1000)
+
+x2_test<-runif(1000)
+
+```
+
+## 1. Classifying Y from X1 and X2: X1<X2
+Classifying Y from X1 and X2. Where $Y = \{_{0, \ other \ wise}^{1, \ X1<X2}$
+**nodeSize = 25**
+
+After repeating the above procedure for 1000 training data sets of size 100,
+following are the observations.
+```{r}
+#a 
+Error_a = run_model(1000, 25, condition = "a")
+```
+
+## 2. Classifying Y from X1 and X2: X1<0.5
+Classifying Y from X1 and X2. Where $Y = \{_{0, \ other \ wise}^{1, \ X1<0.5}$
+**nodeSize = 25**
+
+After repeating the above procedure for 1000 training data sets of size 100,
+following are the observations.
+```{r}
+# b
+Error_b = run_model(1000, 25, condition = "b")
+```
+
+## 3. Classifying Y from X1 and X2: X1<0.5 & X2<0.5 | X1>0.5 & X2>0.5
+Classifying Y from X1 and X2. Where $Y = \{_{0, \ other \ wise}^{1, \ (X1<0.5 \ \&\ X2<0.5)|(X1>0.5 \ \&\ X2>0.5)}$
+**nodeSize = 12**
+
+After repeating the above procedure for 1000 training data sets of size 100,
+following are the observations.
+```{r}
+# c
+Error_c = run_model(1000, 12, condition = "c")
+```
+
+
+## 4.
+
+### 4.1. What happens with the mean and variance of the error rate when the number of trees in the random forest grows?
+
+Random forest algorithm create several subsets of data from training sample chosen randomly with replacement (bagging) with a goal of variance reduction. But this procedure can lead to  correlation between the random forest trees. In order to de-correlate, algorithm randomly picks m variables out of pool of variables as candidates at each split. So as the number of trees increases the algorithm generates more training samples and hence makes the model insensitive to changes in the data. Finally classification is performed based on the majority voting. 
+
+considering Number of trees = 1:
+
+In this case, random forest model samples single data set from the training data, hence no significant improvement in the variance. Which results in high misclassification error.
+
+In case of Number of trees = 10 and 100:
+
+Random forest model samples 10 and 100 data set with replacement from the training data, hence model gets trained with more combinations of observations, this makes the model more robust. As a result model gives a very less misclassification error and when run such model over multiple iterations, we can observe that error produced in the consecutive iterations are also very less. Hence the mean and Variance of the error rate decreased.
+
+Bagging error:
+
+$error_{bag}(D)=\frac{1}{B^{2}}\sum_b error^b(D)$
+
+Bagged error {$error_{bag}(D)$}is never larger than the individual error {$error^b(D)$}.
+
+In addition, if individual errors ($error^b(D)$) are identically distributed with same variance ($\sigma^2$) with not or positively correlated ($\rho$). Then, variance in bagging error is always lesser than the variance of individual error:
+$\rho\sigma^2 + \frac{1-\rho}{n}\sigma^2<\sigma^2$
+
+
+### 4.2.	
+
+The third dataset represents a slightly more complicated classification problem than the first one. Still, you should get better performance for it when using sufficient trees in the random forest. Explain why you get better performance.
+
+In 1st data set ("a"), labels are generated with single condition (*Y=X1<X2*). Where as in 3rd data set ("c"), the labels are generated with multiple conditions (*X1<0.5 & X2<0.5)|(X1>0.5 & X2>0.5*) hence the splits in random forest trees with 3rd data set will be more complicated than that of 1st data set. Therefore the third dataset represents a slightly more complicated classification problem than the first one. 
+
+In the first case ("a"), the model runs with *nodeSize = 25* which means there can be minimum of 25 observations in the terminal nodes. Where as in 3rd case ("c) the *nodeSize = 12*, here there can be minimum of 12 observations in the terminal nodes. Setting lower nodeSize values, leads to trees with a larger depth which means that more splits are performed until the terminal nodes. Because of this the case 3 model performs better.
+
+### 4.3.	Why is it desirable to have low error variance ?
+Decision trees are sensitive to the data. For a slight difference in training data model will result in different error rate. So it is desirable to have low error variance which depicts that the model is more robust.
+
+```{r,echo=FALSE}
+
+#########################  End Random Forest Code  #############################
+```

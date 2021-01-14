@@ -1,0 +1,397 @@
+---
+title: "Assignment 2"
+---
+# Assignment 2. Decision trees and Naïve Bayes for bank marketing
+
+## 1. Import the data to R, remove variable “duration” and divide into training/validation/test as 40/30/30
+
+```{r, echo=FALSE,warning=FALSE,message=FALSE}
+library("tree")
+
+library("e1071")# Naive Bayes
+
+library("rpart")
+
+library("ggplot2")
+```
+
+```{r,echo=FALSE,warning=FALSE,message=FALSE}
+data = read.csv2("bank-full.csv",header = TRUE,stringsAsFactors = TRUE)
+
+# Data Insights
+##  Input variables: 16
+##  Total Records: 45,211
+##  Records Labeled as yes: 5289 (11%)
+##  Records Labeled as No: 39922 (89%)
+
+# Removing "Duration Variable"
+drop = c("duration")
+
+data <- data[,!(names(data) %in% drop)]
+
+n <- dim(data)[1]
+
+ncol <- dim(data)[2]
+
+##  Selecting Training data (40% of total)
+set.seed(12345)
+
+id <- sample (1:n, floor(n * 0.4))
+
+train <- data[id, ]
+
+train_target <- train[,ncol]
+
+##  Selecting the data to validate (30%)
+
+id1 <- setdiff(1:n, id)
+
+set.seed(12345)
+
+id2 <- sample(id1, floor(n * 0.30))
+
+valid <- data[id2, ]
+
+valid_target <- valid[,ncol]
+
+##  Selecting the data to Test (30%)
+
+id3 <- setdiff(id1, id2)
+
+test <- data[id3, ]
+
+test_target <- test[,ncol]
+
+```
+
+## 2. Fit decision trees to the training data so that you change the default settings one by one (i.e. not simultaneously):
+
+### a. Decision Tree with default settings.
+```{r,echo=FALSE,warning=FALSE,message=FALSE}
+ptime <- proc.time()
+fit = tree (y~., data = train)
+ptime_fit1 <- proc.time()-ptime
+
+#plot(fit)
+#text(fit, pretty = 0)
+meanDev_1 <- summary(fit)$dev/summary(fit)$df
+
+
+yfit = predict(fit, newdata = train, type = "class") # Fit the model on Train
+cat("Confusion Matrix: Train \n")# Confusion Matrix: Train
+tConfMat <- table("true"= train$y, "predicted" = yfit)
+tConfMat
+train_error_1<-(sum(tConfMat) - sum(diag(tConfMat)))/sum(tConfMat)
+cat(" Misclassifincation Error in train: ",train_error_1,"\n\n")
+
+
+yfit = predict(fit, newdata = valid, type = "class")# Fit the model on valid
+cat("Confusion Matrix: Valid \n")# Confusion Matrix: valid
+vConfMat <- table("true" = valid$y, "predicted" = yfit)
+vConfMat
+valid_error_1<-(sum(vConfMat) - sum(diag(vConfMat)))/sum(vConfMat)
+cat(" Misclassifincation Error in Valid: ",valid_error_1,"\n")
+
+```
+
+### b. Decision Tree with smallest allowed node size equal to 7000.
+
+```{r,echo=FALSE,warning=FALSE,message=FALSE}
+ptime <- proc.time()
+fit = tree (y~., data = train,control = tree.control(nobs = nrow(train),minsize = 7000))
+ptime_fit2 <- proc.time()-ptime
+
+
+#(fit)
+#text(fit, pretty = 0)
+meanDev_2 <- summary(fit)$dev/summary(fit)$df
+
+
+yfit = predict(fit, newdata = train, type = "class") # Fit the model on Train
+cat("Confusion Matrix: Train \n")# Confusion Matrix: Train
+tConfMat <- table("true"= train$y, "predicted" = yfit)
+tConfMat
+train_error_2<-(sum(tConfMat) - sum(diag(tConfMat)))/sum(tConfMat)
+cat(" Misclassifincation Error in train: ",train_error_2,"\n\n")
+
+
+yfit = predict(fit, newdata = valid, type = "class")# Fit the model on valid
+cat("Confusion Matrix: Valid \n")# Confusion Matrix: valid
+vConfMat <- table("true" = valid$y, "predicted" = yfit)
+vConfMat
+valid_error_2<-(sum(vConfMat) - sum(diag(vConfMat)))/sum(vConfMat)
+cat(" Misclassifincation Error in Valid: ",valid_error_2,"\n")
+```
+
+### c. Decision trees minimum deviance to 0.0005.
+```{r,echo=FALSE,warning=FALSE,message=FALSE}
+ptime <- proc.time()
+fit = tree (y~., data = train, mindev = 0.0005)
+ptime_fit3 <- proc.time()-ptime
+
+
+#plot(fit)
+meanDev_3 <- summary(fit)$dev/summary(fit)$df
+
+yfit = predict(fit, newdata = train, type = "class") # Fit the model on Train
+cat("Confusion Matrix: Train \n")# Confusion Matrix: Train
+tConfMat <- table("true"= train$y, "predicted" = yfit)
+tConfMat
+train_error_3 <- (sum(tConfMat) - sum(diag(tConfMat)))/sum(tConfMat)
+cat(" Misclassifincation Error in train: ",train_error_3,"\n\n")
+
+
+yfit = predict(fit, newdata = valid, type = "class")# Fit the model on valid
+cat("Confusion Matrix: Valid \n")# Confusion Matrix: valid
+vConfMat <- table("true" = valid$y, "predicted" = yfit)
+vConfMat
+valid_error_3 <- (sum(vConfMat) - sum(diag(vConfMat)))/sum(vConfMat)
+cat(" Misclassifincation Error in Valid: ",valid_error_3,"\n")
+```
+**Report the misclassification rates for the training and validation data. Which model is the best one among these three? Report how changing the deviance and node size affected the size of the trees and explain why**
+
+Below table shows the misclassication rates for training and validation data. Observing the metrics showed in table, tree with default setting  is best out of three. The said tree has same error rate but slightly less mean residual deviance when compared with the tree with *minsize = 7000*  and has least error rate compared to the tree with *mindev=0.0005*. 
+
+**Effect of modifying minsisze**: This parameter Controls the number of nodes by considering the number of observations that a node can have. By setting this number to 7000 we have restricted the tree to grow only upto 5 terminal nodes. By comparing this tree with the default tree we could see that due to reduced splits, the mean residual deviance is slightly high.
+
+**Effect of modifying mindev**: The within node deviance must be equal to mindev times the deviance in the root node, for the node to split. Smaller the value of mindev larger the tree size. But we observe that given the fully grown tree, model overfits. Even execution time is also slightly more compared to the other trees in the table.
+
+```{r,echo=FALSE,warning=FALSE,message=FALSE}
+library(knitr)
+kable(data.frame("Tree Setting" = c("Default", "minsize=7000", "mindev=0.0005"),
+      "Residual mean deviance" = c(meanDev_1, meanDev_2, meanDev_3),
+      "Train Error Rate" = c(train_error_1,train_error_2,train_error_3),
+      "Valid Error Rate" = c(valid_error_1,valid_error_2,valid_error_3),
+      "Execution Time" = c(ptime_fit1[[3]],ptime_fit2[[3]],ptime_fit3[[3]])),
+      caption = "Model Observations"
+)
+
+```
+
+
+## 3. Use training and validation sets to choose the optimal tree depth in the model 2c: study the trees up to 50 leaves. 
+
+Present a graph of the dependence of deviances for the training and the validation data on the number of leaves and interpret this graph. Report the optimal amount of leaves and which variables seem to be most important for decision making in this tree. Interpret the information provided by the tree structure (not everything but most important findings). Estimate the confusion matrix and misclassification rate for the test data and comment whether the model has a good predictive power.
+
+
+```{r,echo=FALSE,warning=FALSE,message=FALSE}
+## Holdout Method
+fit = tree (y~., data = train, mindev = 0.0005)
+
+trainScore <- rep(0,50)# Initializing Training Score
+
+validScore <- rep(0,50)# Initializing Validation Score
+
+misclass<-rep(0,50)# Initializing misclassification error
+
+for (i in 2:50){
+  
+  prunedTree <- prune.tree(fit, best = i)
+  
+  predtr <-predict(prunedTree, newdata = train, type = "tree")
+  
+  pred = predict(prunedTree, newdata = valid, type = "tree")
+  
+  # Calculation of deviance
+  trainScore[i] <- deviance(predtr)
+  
+  validScore[i] <- deviance(pred)
+  
+  # Calulation of misclassification error
+  
+  valid_pred <- predict(prunedTree, newdata = valid, type = "class")
+  vConfMat <- table("true" = valid$y, "predicted" = valid_pred)
+  misclass[i] <- (sum(vConfMat)-sum(diag(vConfMat)))/sum(vConfMat)
+
+}
+
+```
+
+The deviance dependence graph shows that, deviance for training data is decreasing continuously as the number of leaves increases. Where as in validation data, the deviance seems to be decreasing at first till the optimal number of leaves (number of leaves = 22), there after the validation deviance starts to increase. Which signifies that the model will overfit for increased number of leaves.
+```{r,echo=FALSE,warning=FALSE,message=FALSE}
+
+terminalNode <- which(validScore==min(validScore[-1]))# optimal Terminal node
+
+plot(2:50, trainScore[2:50], type = "b", pch=19, col = "red", ylim=c(8000,12000),
+     main ="Deviance: Train Score vs Validation Score",
+     ylab = "Deviance", xlab = "Number of Leaves")
+points(2:50, validScore[2:50], type = "b",pch=18, col = "blue")
+abline(v = terminalNode, lty = "dashed", col = "gray")
+abline(h = min(validScore[-1]), lty = "dashed", col = "gray")
+
+  text(
+    paste("Optimal Number Of leaves = ", terminalNode),
+    x = terminalNode,
+    y =  min(validScore[-1]) + 1000,
+    pos = 4,
+    cex = 0.7
+  )
+legend(40, 11000, legend=c("TrainScore", "ValidScore"),
+       col=c("red", "blue"), lty=1:2, cex=0.8)
+  
+ptime <- proc.time()
+finalTree = prune.tree(fit, best = terminalNode)# Pruning the tree to optimal nodes
+ptime_fit4 <- proc.time()-ptime
+
+cat("Optimal Number Of Leaves: ",terminalNode,"\n")
+cat("Most Contributing Variables: ",as.character(summary(finalTree)[[3]]),"\n")
+
+
+yfit = predict(finalTree, newdata = test, type="class")# Fit the Test to pruned tree
+cat("Confusion Matrix: Test \n")# Confusion Matrix: Test
+prunedConfMat <- table("true" = test$y, "predicted" = yfit)
+prunedConfMat
+pruned_error <- (sum(prunedConfMat)- sum(diag(prunedConfMat)))/sum(prunedConfMat)
+cat(" Misclassifincation Error in Test: ",pruned_error,"\n")
+
+#summary(finalTree)
+```
+Observing the above results - miscalssification rate in test and the residual mean deviance, the tree pruned to optimal number of leaves has good predictive power. 
+
+```{r,echo=FALSE,message=FALSE,warning=FALSE}
+plot(finalTree,type=c("uniform"), title = "Optimal Tree")
+text(finalTree,pretty = 1)
+```
+
+The above optimal tree graph contains 22 leaf nodes and depth = 11. Out of 15 input variables, the tree considers only 9 variables for decision making. Analyzing the tree further, 
+
+Split 1: tree splits based on outcome of the previous marketing campaign (*poutcome*) where there were 4 outcomes, out of which outcome success had more client subscribed to the term deposit hence we could see 2 branches at the root node of the graph - right branch for successful outcome and left for the rest.
+
+Tracing the right most branch:
+
+Split 2: The second split takes place based on the number of days that passed by after the client was last contacted from a previous campaign. If the campaign and customer contacting happens within 94.5 days, there is a high probability that the client would subscribe for the term deposit and turns out to be the leaf. The lower probability branch since it has not reached min deviance limit goes for further split.
+
+Split 3: The final split on this branch happens based on the job of the client. Tree identifies that the clients belonging to admin,blue-collar,entrepreneur,services and technician category are highly likely to opt term deposit option and rest are not. This branch ends into two leaf nodes.
+
+Remaining branches happen in the similar fashion.
+
+## 4. Perform a decision tree classification of the test data with the following loss matrix
+
+$$L = observed \ \  _{yes}^{no} \begin
+{pmatrix}
+0&1 \\
+5&0 \\
+\end{pmatrix}^{Predicted}$$
+and report the confusion matrix for the test data. Compare the results with the results from step 3 and discuss how the rates has changed and why.
+
+The loss matrix used to weigh the mis-classifications. In case of two class problems, False Positive and True Negative are the errors which needed to be weighed based on the type, which causes more of a loss.
+
+We have used the above mentioned loss matrix which alters the probabilities. Here we are increasing the probabilities of Class Yes to avoid mis-classification of clients into NO bucket. Hence the resulting classification gets altered. Same can be observed from the below mentioned confusion matrices. Error rate is more that is because we increased the probability of class yes using loss matrix.
+```{r,echo=FALSE,warning=FALSE,message=FALSE}
+L = matrix(c(0,5,1,0), ncol=2)# Loss Matrix
+# Using RPART pACKAGE
+
+#ptime <- proc.time()
+#fit = rpart(formula = y~., data = train, parms = list(loss=L))
+#ptime_fit5 <- proc.time()-ptime
+#
+#yfit = predict(fit, newdata = test, type="class")
+#
+## Confusion Matrix: Test
+#tConfMat <- table("true" = test$y, "predicted" = yfit)
+##tConfMat
+#lossM_error<-(sum(tConfMat)- sum(diag(tConfMat)))/sum(tConfMat)
+#cat(" Misclassifincation Error in Test with Loss Matrix: ",lossM_error,"\n")
+
+# Using formula
+yfit_new = predict(finalTree, newdata = test, type="vector")
+
+vect <- cbind("No"= yfit_new[,1]*1, "yes" = yfit_new[,2]*5) # Assigning the weight as per loss matrix
+
+
+new_class <- factor(ifelse(vect[,1]>vect[,2],"no","yes"),levels=c("no","yes"))
+
+# Confusion Matrix: Test
+tConfMat <- table("true" = test$y, "predicted" = new_class)
+#tConfMat
+lossM_error<-(sum(tConfMat)- sum(diag(tConfMat)))/sum(tConfMat)
+cat(" Misclassifincation Error in Test with Loss Matrix: ",lossM_error,"\n")
+```
+```{r,echo=FALSE,warning=FALSE,message=FALSE}
+
+
+cat("Optimal Tree Confusion Matrix \n")
+prunedConfMat
+
+cat("5-1 Loss Matrix Tree Confusion Matrix \n")
+tConfMat
+
+```
+
+## 5. Use the optimal tree and the Naïve Bayes model to classify the test data by using the following principle:
+$\hat{Y} = 1 \ if \ p(Y=good|X)>\pi, \ otherwise \hat{Y}=0$
+where $\pi$=0.05, 0.1, 0.15, ...0.9, 9.95. Compute the TPR and FPR values for the two models and plot the corresponding ROC curves. Conclusion?
+
+```{r,echo=FALSE,warning=FALSE,message=FALSE}
+# Naive Bayes fitting
+cat("Classification Using Naive Bayes \n")
+naiveFit <- naiveBayes(y ~ ., data = train)
+nPred <- predict(naiveFit, newdata = train) # Fitting training data
+nTrainConfMat <- table("true"=train$y, "predicted"=nPred) # Confusion Matrix
+cat("Confusion Matrix: Train \n")
+print(nTrainConfMat)
+cat(" Misclassifincation Error in Train: ",
+    1- sum(diag(nTrainConfMat))/sum(nTrainConfMat),"\n")
+
+nPred <- predict(naiveFit, newdata = test) # Fitting test data
+nTrainConfMat <- table("true" = test$y, "predicted"=nPred) # Confusion Matrix
+cat("Confusion Matrix: Test \n")
+print(nTrainConfMat)
+cat(" Misclassifincation Error in Test: ",
+    1- sum(diag(nTrainConfMat))/sum(nTrainConfMat),"\n")
+
+```
+
+Observing the below ROC curves for Naive Bayes and Optimal Decision tree models, the area under the optimal tree is larger than the Naive Bayes model. Hence, Optimal Tree is better classifier for the given data.
+
+```{r,echo=FALSE,warning=FALSE,message=FALSE}
+# ROC: Receiver Operating Characteristics
+# TPR: TP/(TP+FN)
+# FPR: FP/(TN+FP)
+
+pi <- seq(0.05,0.95,0.05)# initializing pi
+
+treeTpr <- c() # optimal tree True Positive Rate
+treeFpr <- c() # Optimal tree False Positive Rate
+
+nTpr <- c()#  Naive Bayes True Positive Rate
+nFpr <- c()# Naive Bayes False Positive Rate
+
+## Getting optimal tree predictions
+treePred  <- as.data.frame(predict(finalTree,newdata = test, type="vector"))
+
+#table(test$y)
+
+## Naive Bayes Prediction
+nPred <- predict(naiveFit, newdata = test, type = "raw")
+
+for(i in 1:length(pi)){
+
+  treePrinciple <- factor(ifelse(treePred[,2]>pi[i],"yes","no"), levels=c("no","yes"))
+  treeConfMatrix <- table("true" = test$y, "predicted" = treePrinciple)
+
+  treeTpr[i] <- treeConfMatrix[2,2]/sum(treeConfMatrix[2,])
+  treeFpr[i] <- treeConfMatrix[1,2]/sum(treeConfMatrix[1,])
+
+  nPrinciple <- factor(ifelse(nPred[,2]>pi[i],"yes","no"), levels=c("no","yes"))
+  nConfMatrix <- table("true"=test$y,"predicted"=nPrinciple)
+
+  nTpr[i] <- nConfMatrix[2,2]/sum(nConfMatrix[2,])
+  nFpr[i] <- nConfMatrix[1,2]/sum(nConfMatrix[1,])
+  
+}
+
+```
+
+```{r,echo=FALSE,warning=FALSE,message=FALSE}
+## ROC Plot
+
+ggplot()+
+  geom_line(aes(x=seq(0,1,by=0.5),y=seq(0,1,by=0.5)), linetype="dashed",color="grey")+
+  geom_line(aes(x = treeFpr, y= treeTpr, color = "Optimal Tree"),linetype="dashed")+
+  geom_point(aes(x = treeFpr, y= treeTpr,color = "Optimal Tree"))+
+  geom_line(aes(x = nFpr, y= nTpr, color = "Naive Bayes"),linetype="dashed")+
+  geom_point(aes(x = nFpr, y= nTpr, color = "Naive Bayes"))+
+  ylab("TPR") + xlab("FPR") + ggtitle("ROC Curve for Naive Bayes and Optimal Tree")+
+  theme(plot.title = element_text(hjust = 0.5))  
+```

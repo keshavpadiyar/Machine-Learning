@@ -1,0 +1,635 @@
+---
+title: "Handwritten Digit Recognition with K - Nearest Neighbour (knn) Classification"
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(comment = NA)
+```
+# Assignment 1. OverviewHandwritten Digit Recognition with K - Nearest Neighbour (knn) Classification
+## Dataset 
+The dataset contains information about normalized bitmaps of handwritten digits 
+from a pre-printed form from a total of 43 people. 
+The data were first derived as 32x32 bitmaps which were then divided into
+non-overlapping blocks of 4x4 and the number on pixels are counted in each block.
+This has generated the resulting image of size 8x8 where each element is an 
+integer in the range 0 to 16. Accordingly, each row in the data-set is a sequence
+corresponding 8x8 matrix, and the last element contains the actual values of the 
+digits i.e. 0 to 9.
+
+## Objective of the experiment
+
+Using **knn** algorithm, considering the pixel values of each digit classify them
+into their respective classes (0-9). Identifying the optimal k value such that 
+the error of classification is minimized.
+
+## Libraries used:
+a. kknn
+b. dplyr
+c. reshape2
+d. ggplot2
+
+```{r, echo=FALSE,warning=FALSE,message=FALSE}
+
+library ("kknn")
+
+library ("dplyr")
+
+library("reshape2")
+
+library("ggplot2")
+
+```
+
+## Methods Section:
+Below are the methods written to achieve the objective:
+
+  a. **accuracy**: Takes confusion matrix as input, and calculates the accuracy (%) by
+               considering the diagonal elements using the formula 
+  $$accuracy = \frac {sum(diag(x))}{sum(rowSums(x)))} * 100,\ x=Confusion \ Matrix$$
+```{r,echo=FALSE}
+##  Function to Calculate the Model Accuracy
+
+accuracy <- function(x){
+
+  return ((sum(diag(x))/sum(rowSums(x))) * 100 )
+
+}## End accuracy Function
+
+```
+
+  b. **join_data_prob**: Method to map the cluster probabilities with the actual data
+                     and returns a data.frame.
+```{r,echo=FALSE}
+##  Function to join data and probabilities, given the digit
+
+join_data_prob <- function (df_data, fit , digit, matrix_prob){
+
+  df <- cbind(df_data, fit, prob = matrix_prob[,colnames(matrix_prob)==digit] )
+
+  df <- dplyr::filter(df, fit == digit)
+
+  return(df)
+
+}##  End join_data_prob Function
+```
+
+  c. **cross_entropy**: Method to calculate the Cross Entropy in the data sets and
+                    returns the log probabilities. Detailed 
+                    description for this approach is given in section 5 below.
+
+```{r,echo=FALSE}
+## 5.1 compute the empirical risk for the validation data as cross-entropy
+## Function to calculate cross-entropy
+
+cross_entropy <- function(par, prob){
+
+       data <- prob[par, ]
+
+       val <- data$actual
+
+       log_prob <- log(data[,val+1] + 1 * exp(-15))
+
+       return(- log_prob)
+
+}
+```   
+  
+  d. **func_compute**: This method is the computation engine, which takes the model 
+                    object and target variable (vector) as input and returns a 
+                    list having following values.
+                    
+                    i. fitted values
+                    
+                    ii. confusion matrix using table() function
+                    
+                    iii. model accuracy
+                    
+                    iv. miscalssification error, (100- accuracy)
+                    
+                    v. probabilities matrix
+                    
+                   vi. data.frame of probabilities matrix mappd with fitted 
+                        and actual values
+                        
+                   vii. log probabilites of each pixel
+                    
+                  viii. corss entropy value
+
+```{r,echo=FALSE}
+
+## Clubbing all the function into single
+func_compute <- function(model, target){
+
+  data_fit <- fitted(model)
+
+  conf_matrix <- table (target, data_fit)
+
+  model_accuracy <- accuracy(conf_matrix)
+
+  model_miscalssification <- 100 - model_accuracy
+
+  matrix_prob <- model$prob
+
+  prob <- data.frame(matrix_prob, fit = data_fit, actual = target)
+
+  log_prob <- lapply (1:nrow(prob),cross_entropy, prob)
+
+  entropy <- sum(unlist(log_prob))/nrow(prob)
+
+  return (
+
+    list (
+
+      fiited_val = data_fit,
+
+      cf = conf_matrix,
+
+      accuracy = model_accuracy,
+
+      missclassification_error = model_miscalssification,
+
+      prob_df = prob,
+
+      log_prob = unlist(log_prob),
+
+      entropy = entropy
+
+    )
+
+  )
+
+}## End func_compute
+
+```
+## 1. 
+Importing the data from *optdigits.csv*. As per the *Holdout Method* dividing 
+input data into training (50%), validation (25%) and testing (25%) data sets.
+
+  a. Training set is used for fitting the model, 
+  
+  b. validation set is used to validate the model for different values of k 
+     and choose the best model which has minimum error and hence low risk.
+     
+  c. Finally, the test data is used to performing a test on the model and verify 
+     the model performance on this new data.
+
+```{r,echo=FALSE}
+## 1.1
+## Reading Data
+data <- read.csv("optdigits.csv", header = FALSE)
+
+n <- dim(data)[1]
+
+ncol <- dim(data)[2]
+
+##  Selecting Training data (50% of total)
+set.seed(12345)
+
+id <- sample (1:n, floor(n * 0.5))
+
+train <- data[id, ]
+
+train_target <- train[,ncol]
+
+##  Selecting the data to validate (25%)
+
+id1 <- setdiff(1:n, id)
+
+set.seed(12345)
+
+id2 <- sample(id1, floor(n * 0.25))
+
+valid <- data[id2, ]
+
+valid_target <- valid[,ncol]
+
+
+##  Selecting the data to Test (25%)
+
+id3 <- setdiff(id1, id2)
+
+test <- data[id3, ]
+
+test_target <- test[,ncol]
+
+par(mfrow = c(1,1))
+
+cnt <- c(nrow(train), nrow(valid), nrow(test))
+                           
+b <- barplot(cnt, 
+        main = "Data Distribution",
+        horiz = TRUE, 
+        names.arg = c("Train", "Valid", "Test"),
+        cex.names=0.8,
+        border = TRUE,
+        space = 2,
+        ylim = c(0, 10)
+        
+        )
+
+text(x = b,  labels= as.character(c(nrow(train), nrow(valid), nrow(test))), pos = 4)
+```
+
+## 2.
+*kknn()* package is used to implement the k nearest neighbor classification. 
+The kknn method in the package, for each row of the train/test/valid set, the k 
+nearest training set vectors (according to Minkowski distance) are found, and 
+the classification is done via the maximum of summed kernel densities. In 
+addition even ordinal and continuous variables can be predicted.
+
+In this experiment, following parameters of kknn method are set:
+
+  a. formula: A formula object, i.e target variable (actual digits) given all 
+              pixel values. *target_variable ~ .*
+              
+  b. train: Training data set.
+  
+  c. test: Used Training data set while fitting the model, used validate for the 
+           validation and finally replaced with Test data for verifying the model
+           performance.
+           
+  d. kernel: "*rectangular*" kernel is used, which is standard un-weighted knn.
+              kernel functions are used to weight the neighbors according to 
+              their distances.
+              
+  e. k: Number of neighbors considered.
+  
+  f. scale: Scale's the variable to have equal standard deviation.
+
+```{r}
+## 2
+## Applying KKNN Algorithm on Training data set
+cl_train <- kknn(as.factor(V65) ~ ., 
+                 train, test = train,  
+                 k = 30, kernel = "rectangular" 
+                 )
+
+dt_cl_train = func_compute(cl_train, train_target)
+
+## Applying KKNN Algorithm on TEST data set
+cl_test <- kknn(as.factor(V65) ~ .,
+                train, test = test,  
+                k = 30, 
+                kernel = "rectangular"
+                )
+
+dt_cl_test = func_compute(cl_test, test_target)
+
+```
+### a. Confusion Matrix (using *table()*) of Training Data.
+
+```{r, echo=FALSE}
+##  2.1
+## Confusion Matrix of training data
+
+cat("Confusion Matrix of Training Data: \n\n")
+
+print(dt_cl_train$cf)
+
+```
+
+### b. Miscalssification Error for the Training and Test Data.
+  $$misclassification \ error = 100-accuracy$$
+
+```{r, echo = FALSE}
+##  2.2
+cat ("Model with k = 30")
+cat("Accuracy of model with Training Data: ", 
+    dt_cl_train$accuracy,"%")
+
+cat("Misclassification Error in model with Training Data: ", 
+    dt_cl_train$missclassification_error,"%")
+
+cat("Accuracy of model with Test Data: ", 
+    dt_cl_test$accuracy,"%")
+
+cat("Misclassification Error in model with Test Data: ", 
+    dt_cl_test$missclassification_error,"%")
+
+```
+**Comment on the quality of predictions for different digits and on the overall prediction quality**
+
+Observing the Confusion Matrix and accuracy of the training, 95% 0f the data points got classified appropriately into respective classes. On the other hand, prediction accuracy decreased with the test data. We need to find the optimal value of k for more accuracy.
+
+## 3.
+Reshaping the digit "8" for:
+
+  a. 2 cases where the training data were easiest to classify i.e rows with highest probabilities
+  
+  b. 3 cases where the training data were hard to classify i.e rows with lowest probabilities.
+  
+Used *Image()* function to visualize the pixel values.
+
+Referring to below visualization, pixels of 8 which got classified with highest
+probabilities are easy to recognize visually. On the otherhand the pixels that were
+classified with the lowest probabilities were hard to identify as they recemble some other digit.
+
+```{r, echo=FALSE}
+
+##  3
+## Classification of digit 8 in Training data
+
+matrix_prob <- cl_train$prob
+
+train_fit <- dt_cl_train$fiited_val
+
+digit <-8
+
+df_class <- join_data_prob(train, train_fit, digit, matrix_prob)
+
+df_viz <- head(df_class[order(df_class$prob, decreasing = TRUE),],2)
+
+df_viz <- rbind(df_viz, head(filter(df_class[order(df_class$prob, 
+                                                   decreasing = FALSE),], 
+                                                   fit == V65
+                                    ),3
+                             )# end head
+                )# end rbind
+
+##  Reshaping features into 8x8 matrix
+temp_1 <- matrix((unlist(as.vector(df_viz[1,])[1:64])), 
+                 nrow = 8, ncol = 8, 
+                 byrow = FALSE)
+temp_2 <- matrix((unlist(as.vector(df_viz[2,])[1:64])), 
+                 nrow = 8, ncol = 8, 
+                 byrow = FALSE)
+temp_3 <- matrix((unlist(as.vector(df_viz[3,])[1:64])), 
+                 nrow = 8, ncol = 8, 
+                 byrow = FALSE)
+temp_4 <- matrix((unlist(as.vector(df_viz[4,])[1:64])), 
+                 nrow = 8, ncol = 8,
+                 byrow = FALSE)
+temp_5 <- matrix((unlist(as.vector(df_viz[5,])[1:64])), 
+                 nrow = 8, ncol = 8, 
+                 byrow = FALSE)
+
+par(mfrow=c(2,3))
+
+image(temp_1[,nrow(temp_1):1], main = "Probability = 1")
+image(temp_2[,nrow(temp_2):1], main = "Probability = 1")
+image(temp_3[,nrow(temp_3):1], main = "Probability = 0.33")
+image(temp_4[,nrow(temp_4):1], main = "Probability = 0.33")
+image(temp_5[,nrow(temp_5):1], main = "Probability = 0.36")
+
+```
+
+## 4.
+Fitting the model on training and validation data for k values ranging from
+1 to 30.
+
+**4.1 How does the model complexity change when K increases and how does it affect the training and validation errors?**
+As the k value increases, number of neighbors also increases hence model complexity increases. 
+
+In addition, beyond the optimal value of k, both train and validation errors are increasing.
+
+**4.2 The optimal k according to this plot**: 3 or 4
+
+**4.3 Discuss this plot from the perspective of bias-variance tradeoff**
+
+Referring to the below graph, for initial value of k, the training data gives 
+0% error, but could identify around 2% error in the validation data. It is due to
+overfit (bias is low and variance is high) on the training data for lower k value ( k = 1 & 2). 
+
+As k value increases ($2<k \le4$), gradual decrease in error in validation data 
+is observed, but this is upto an optimal k. This shows that for those k values 
+the bias is low and variance is decreasing. 
+
+At k = 3 & 4 there is a drop in the error of validation data and that k value has the 
+lowest error. And it can be inferred that, at k =  3&4 bias 
+and variances are optimal  hence the error is lowest. 
+
+For k>4, both training and validation error rates eventually start increasing again,
+this is due to the underfitting (high bias).
+
+
+```{r,echo=FALSE}
+##  4, 5
+
+missClassification_train = c()
+
+missClassification_valid = c()
+
+training_entropy <- c()
+
+valid_entropy <- c()
+
+for (k in 1:30){
+
+
+  cl_train <- kknn(as.factor(V65) ~ ., 
+                   train, test = train,  
+                   k = k, 
+                   kernel = "rectangular"
+                   )
+
+  dt_cl_train = func_compute(cl_train, train_target)
+  
+  missClassification_train [k] <- dt_cl_train$missclassification_error
+
+  training_entropy [k] <- dt_cl_train$entropy
+
+  cl_valid <- kknn(as.factor(V65) ~ ., 
+                   train, test = valid,  
+                   k = k, kernel = "rectangular"
+                   )
+
+  dt_cl_valid = func_compute(cl_valid, valid_target)
+
+  missClassification_valid [k] <- dt_cl_valid$missclassification_error
+
+  valid_entropy [k] <- dt_cl_valid$entropy
+
+
+}
+
+df_loss <- data.frame(y1 = missClassification_train,
+                      y2 = missClassification_valid,
+                      y3 = training_entropy,
+                      y4 = valid_entropy,
+                      x = 1:30
+                      )
+
+## Theme for ggplot
+knn_theme <- theme(
+
+  panel.background = element_rect(fill=NA),
+  panel.border = element_rect(fill= NA),
+  aspect.ratio = 0.5:0.5,
+
+  #grid elements
+  panel.grid.major = element_blank(),
+  panel.grid.minor = element_blank(),
+  axis.ticks = element_line(colour = 'black'),
+  axis.title = element_text(face = "bold", size = 12),
+  axis.line = element_line(color = 'black'),
+  axis.line.x.top = element_line(color = 'black'),
+
+  plot.title = element_text(
+    size = 14,
+    face = "bold",
+    hjust = 0.5,
+    vjust = 2),
+
+  plot.caption = element_text(
+    size = 12,
+    hjust = 0.5),
+)
+
+```
+
+```{r, echo=FALSE}
+
+##  4.1
+
+df_misclassification <- melt(df_loss, id.vars = "x", 
+                             
+                             measure.vars= c("y1", "y2"))
+
+ ggplot(data = df_misclassification)+
+
+  geom_line(aes(x = x, y = value, colour = variable), size = 1.5)+
+
+  labs( y = "MisClassification Error (%)",
+
+        x = "K Values",
+
+        title = "Misclassification in Training Data Vs Validation Data")+
+
+  scale_color_manual(labels = c("missClassification_Train", 
+                                "missClassification_Valid"), 
+                     values = c("blue", "red"))+
+   
+     
+  geom_vline(xintercept = 3, linetype = "dotted") +
+   
+  geom_vline(xintercept = 4, linetype = "dotted") +
+  
+  scale_x_continuous(breaks = 1:30) +
+
+  knn_theme
+
+```
+
+**4.4 Estimate the test error for the model having the optimal k**
+
+Obtaining the Accuracy and Misclassification Error for k = 4, using Training, Validation
+and Test data.
+
+```{r, echo=FALSE}
+
+## 4.5
+## Applying KKNN Algorithm on Training data set
+k = 4
+
+k6_train <- kknn(as.factor(V65) ~ ., 
+                 train, test = train,  
+                 k = k, kernel = "rectangular"
+                 )
+
+dt_k6_train = func_compute(k6_train, train_target)
+
+## Applying KKNN Algorithm on TEST data set
+k6_valid <- kknn(as.factor(V65) ~ .,
+                train, test = valid,  
+                k = k, 
+                kernel = "rectangular"
+                )
+
+dt_k6_valid = func_compute(k6_valid, valid_target)
+
+## Applying KKNN Algorithm on TEST data set
+k6_test <- kknn(as.factor(V65) ~ .,
+                train, test = test,  
+                k = k, 
+                kernel = "rectangular" 
+                )
+
+dt_k6_test = func_compute(k6_test, test_target)
+
+cat("Model with K = ",k)
+
+cat("Accuracy of  model with Training Data: ",
+    dt_k6_train$accuracy,"%")
+
+cat("Misclassification Error in model with Training Data: ", 
+    dt_k6_train$missclassification_error,"%")
+
+cat("Accuracy of Model with Validation Data: ", 
+    dt_k6_valid$accuracy,"%")
+
+cat("Misclassification Error in model with  validation Data: ", 
+    dt_k6_valid$missclassification_error,"%")
+
+cat("Accuracy of model with Test Data: ", 
+    dt_k6_test$accuracy,"%")
+
+cat("Misclassification Error in model with Test Data: ", 
+    dt_k6_test$missclassification_error,"%")
+```
+**4.5 Compare test error with the training and validation errors and make necessary conclusions regarding the model quality**
+
+Looking at above missclassification error values, its inferred that for k = 4  
+the errors are lowest and improved the model performance.
+
+## 5.
+
+Cross Entropy measures the relationship between the estimated distribution and the
+actual distribution of the target variable.
+
+Cross Entropy is calculated using the formula
+$$CrossEntropy = - \sum_{i=1}^n \sum_{j=i}^k I(y_{i}=j)\log{(\hat p_{j}(x_{i})+1e^{-15})}$$
+
+```{r,echo=FALSE}
+
+df_crossEntropy <- melt(df_loss, id.vars = "x", measure.vars= c("y3", "y4"))
+
+ggplot(data = df_crossEntropy)+
+
+  geom_line(aes(x = x, y = value, colour = variable), size = 1.4)+
+
+  labs( y = "mean - Cross-Entropy Error",
+
+        x = "K Values",
+
+        title = "Cross-Entropy in Training Data Vs Validation Data")+
+
+  scale_color_manual(labels = c("CrossEntropy_Train", "CrossEntropy_Valid"),
+                     
+                  values = c("blue", "red"))+
+  
+  geom_vline(xintercept = 6, linetype = "dotted") +
+  
+  scale_x_continuous(breaks = 1:30)+
+
+  knn_theme
+```
+**5.1 What is the optimal k value here?**
+
+The above graph illustrates that, for k = 6 validation model shows the lowest error.
+Hence it can be inferred that, optimal value for k is 6.
+
+**5.2 Why might the cross-entropy be a more suitable choice of the empirical risk function than the misclassification error for this problem?**
+
+Cross entropy method considers the probability with which each data
+point has been classified into any of the classes, as a result of this the 
+error is calculated from more granular level. 
+
+For example: considering the classification of digit 8. There are evidences where
+pixels are classified as digit 8 with the uncertainty (probability) = 0.333.
+Even with such a low uncertainty data points get classified as a result of majority
+voting. Cross Entropy penalizes such data points based on in the probability.
+Where as misclassification just compares the fitted value against the true value, 
+hence  cross entropy method gives more accurate result.
+
+```{r, echo=FALSE}
+k = 6
+
+cat("Model with K = ",k)
+
+cat("Cross Entropy Error in model with Training Data: ",
+    training_entropy[k])
+
+cat("Cross Entropy Error in Model with Validation Data: ", 
+    valid_entropy[k])
+
+```

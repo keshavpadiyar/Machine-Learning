@@ -1,0 +1,279 @@
+---
+title: "Lab 3 Block 1 Assignment 1"
+output: pdf_document
+header-includes:
+    - \usepackage{bm}
+---
+
+
+# Assignment 1 Kernel methods
+
+You are asked to provide a temperature forecast for a date and place in Sweden. The
+forecast should consist of the predicted temperatures from 4 am to 24 pm in an interval of 2
+hours. Use a kernel that is the sum of three Gaussian kernels:
+
+```{r setup3, include=FALSE}
+
+library("ggplot2")
+library("geosphere")
+library("lubridate")
+library("dplyr")
+
+theme_set(theme_bw())
+theme_update(plot.title = element_text(size=16,face="bold",hjust = 0.5),
+             axis.text = element_text(size=6,colour="black"),
+             axis.title = element_text(size=8),
+             legend.title = element_text(size=15)) 
+
+
+```
+
+
+The kernel is based on measure distances to, in this case there are 3 distances: *Physical* (spatial), *Date* which assume within a year, maximum 182 or 183 depending of leap year. And also *Time* 24 hours (assuming maximum distance of 12 hours). These distances $||x - x'||$ are later referred to as $d$.
+
+```{r}
+# Calculate the time distance, this is not trivial since 0:23 can't be 
+# subtracted as usual but need to implement a statement that gives us 
+# a absolute time distance for both ways ( max distance 12 hours)
+time_distance <- function(time_point,pred_time){
+ abs_hour <- abs(hour(hms(time_point) - hms(pred_time)))  
+ ifelse(abs_hour < 12, abs_hour, 24 - abs_hour)
+}
+
+# The same logic as before is implemented with years
+# This function somewhat takes in account leap years 
+# Starting by setting all time differences to the same year 
+# for calculating the difference in days ( with start of first of January)
+# then also adding a day if leap year is present
+
+date_distance <- function(date_point,pred_date ){
+if(leap_year(date_point)){
+  # we known that the year is a leap year 
+  fix_year <- as.Date(paste0(year(date_point),"-01-01"))
+  date_diff <-  date_point - fix_year
+  pred_diff <-  as.Date(paste0(year(date_point),"-",
+                               month(pred_date),"-",day(pred_date))) - fix_year
+  abs_diff <- abs(pred_diff-date_diff) 
+  ifelse(abs_diff < (182 + leap_year(date_point)) ,
+         abs_diff, 365 + leap_year(date_point) - abs_diff )
+  
+} else{
+  # we known that the year is not a leap year 
+  fix_year <- as.Date(paste0(year(date_point),"-01-01"))
+  date_diff <-  date_point - fix_year
+  pred_diff <-  as.Date(paste0(year(date_point),"-", month(pred_date),"-",
+                               day(pred_date))) - fix_year
+  abs_diff <- abs(pred_diff-date_diff) 
+  ifelse(abs_diff < 182, abs_diff, 365 - abs_diff )
+}
+}
+
+```
+
+
+
+A kernel which can be written as:
+$$
+k\left(\frac{x-x^{\prime}}{h}\right)
+$$
+
+
+A simplified Gaussian kernel is implemented by taking the distance $d$ and a specified $h$ which is creating $u$. 
+
+$$
+k(u)=\exp \left(-\|u\|^{2}\right)
+$$
+
+```{r}
+gaussian_kernel <- function(d,h){
+exp(-(d/h)^2)
+}
+```
+
+
+Creating the function kernel that take the data, the specified $h$ values, and date and time to predict. Uses the simplified Gaussian kernel for all instances and loops over all specified time point and returns a data frame with the kernel of all time points. 
+
+```{r}
+kernel <- function(data,spatial_h,date_h,time_h,a,b,pred_times,pred_date){
+
+  data$spatial_distance <- distHaversine(p1=c(a,b), 
+                            p2 = matrix(c(data$latitude,data$longitude),ncol=2))
+
+data$date_distance <- date_distance(date_point = data$date, pred_date = pred_date)
+  
+spatial_kernel <-  gaussian_kernel(d= data$spatial_distance, h= spatial_h)
+  
+date_kernel <- gaussian_kernel(d= data$date_distance, h = date_h)
+  
+  kernel_list <- list()[1:length(pred_times)]
+  
+  for(t in 1:length(pred_times)){
+  
+  data$time_distance <- time_distance(time_point = data$time, pred_time=pred_times[t])
+  time_kernel <- gaussian_kernel(d= data$time_distance, h= time_h)
+  
+  kernel_list[[t]] <- data.frame(spatial_kernel,date_kernel,time_kernel)
+
+  }
+  
+  return(kernel_list)
+
+}
+
+```
+
+\newpage
+
+
+Predicting the given coordinates (58.4274,14.826), the physical $h$ is defined by a half standard deviation due to lack of knowledge of spatial impact of the air temperature, one can see in the following map ( [map](https://www.mapdevelopers.com/draw-circle-tool.php?circles=%5B%5B162236.7%2C59.0709822%2C16.1535159%2C%22%23AAAAAA%22%2C%22%23000000%22%2C0.4%5D%5D) ) that the radius of $h$ seems reasonable. Date $h$ is given by 3 weeks, which will capture most of the weeks in a month but still not be influenced by other months to much. Time $h$ is set to 3 hours which also is a subjective choice that make sense due to the rapid changes of temperature over day and night. 
+
+
+
+By multiplying each kernel observation with the air temperature one can predict the air temperature for the unknown weather station and time. 
+```{r}
+mult_kern <- function(kern,respons,time_pred){
+result <- data.frame(time_pred, temp_pred=NA)
+for( t in 1:length(kern)){
+kern_pred <-  apply(kern[[t]],1,prod)
+result[t,2]<- sum(kern_pred * respons)/sum(kern_pred)
+}
+return(result)
+}
+
+
+```
+
+
+In the same way as before one can predict the air temperature for the unknown weather station and time, but instead of multiplying each kernel one can sum them up observation wise in the following way. 
+
+```{r}
+sum_kern <- function(kern,respons,time_pred){
+result <- data.frame(time_pred, temp_pred=NA)
+for( t in 1:length(kern)){
+kern_pred <-  rowSums(kern[[t]])
+result[t,2]<- sum(kern_pred * respons)/sum(kern_pred)
+}
+return(result)
+}
+
+
+```
+
+
+\newpage
+
+The first date that is predicted is 2013-11-04 which is given by the assignment, the position is always fixed on the given coordinates. 
+
+```{r,echo=FALSE,include=FALSE}
+stations <- read.csv("stations.csv",fileEncoding="latin1")
+temps <- read.csv("temps50k.csv")
+st <- merge(stations,temps,by="station_number")
+st$date <- as.Date(st$date)
+
+pred_date <- "2013-11-04" 
+times <- c("04:00:00", "06:00:00", "08:00:00",paste(seq(10,24,2),":00:00",
+                                                    sep = ""))
+# filtering every observation to a given date
+# also include the first hours if they exists, 02:00:00 etc.
+st2 <- st %>% filter(date < pred_date | date==pred_date & time< times[1])
+
+
+a <- 58.4274 
+b <- 14.826
+
+st2$spatial_distance <- distHaversine(p1=c(a,b),
+                                      p2 = matrix(c(st2$latitude,st2$longitude),
+                                                  ncol=2))
+st2$date_distance <- date_distance(date_point = st2$date, pred_date = pred_date)
+st2$time_distance <- time_distance(time_point = st2$time, pred_time=times[1]) # obs, only first time
+
+h_distance <- sd(st2$spatial_distance)/2
+h_date <- 21
+h_time <- 3
+kern <- kernel(st2, spatial_h = h_distance, date_h=h_date, time_h=h_time,
+               a=a,b=b,pred_times = times, pred_date = pred_date)
+
+```
+
+
+```{r,fig.cap="Kernel prediction 1"}
+
+mult <- mult_kern(kern = kern, respons = st2$air_temperature,time_pred = times)
+sum <- sum_kern(kern = kern, respons = st2$air_temperature,time_pred = times)
+
+ggplot(mult,aes(x=time_pred, y=temp_pred)) + geom_point(color="blue") +
+geom_point(y=sum$temp_pred,color="red") + ylim(c(min(mult$temp_pred,sum$temp_pred),
+                                                 max(mult$temp_pred,sum$temp_pred))) +
+labs(y="Predicted Air Temperature",x="Time")
+```
+
+The two prediction follows closely, where the red indicates summation and blue indicates the multiplying kernel. In this case air temperature seems to peak at around 13:00 around 6 degrees celsius and drops down to 3 degrees celsius at night, which seems to be a logic value for this time of the year.
+
+\newpage
+
+
+The second date that is predicted is 2013-06-28 which in comparison is during the summer. The position is fixed on the given coordinates. This demonstrates how the kernel models compares when high temperatures are introduced. 
+
+```{r,echo=FALSE,include=FALSE}
+stations <- read.csv("stations.csv",fileEncoding="latin1")
+temps <- read.csv("temps50k.csv")
+st <- merge(stations,temps,by="station_number")
+st$date <- as.Date(st$date)
+
+pred_date <- "2013-06-28" 
+times <- c("04:00:00", "06:00:00", "08:00:00",paste(seq(10,24,2),":00:00",
+                                                    sep = ""))
+
+st2 <- st %>% filter(date < pred_date | date==pred_date & time< times[1])
+
+
+a <- 58.4274 
+b <- 14.826
+
+st2$spatial_distance <- distHaversine(p1=c(a,b),
+                                      p2 = matrix(c(st2$latitude,st2$longitude),
+                                                  ncol=2))
+st2$date_distance <- date_distance(date_point = st2$date, pred_date = pred_date)
+st2$time_distance <- time_distance(time_point = st2$time, pred_time=times[1]) # obs, only first time
+
+h_distance <- sd(st2$spatial_distance)/2
+h_date <- 21
+h_time <- 3
+kern <- kernel(st2, spatial_h = h_distance, date_h=h_date, time_h=h_time, a=a,b=b,pred_times = times, pred_date = pred_date)
+
+```
+
+
+```{r, fig.cap="Kernel prediction 2"}
+
+mult <- mult_kern(kern = kern, respons = st2$air_temperature,time_pred = times)
+sum <- sum_kern(kern = kern, respons = st2$air_temperature,time_pred = times)
+
+ggplot(mult,aes(x=time_pred, y=temp_pred)) + geom_point(color="blue") +
+geom_point(y=sum$temp_pred,color="red") + ylim(c(min(mult$temp_pred,sum$temp_pred),
+                                                 max(mult$temp_pred,sum$temp_pred))) +
+labs(y="Predicted Air Temperature",x="Time")
+```
+
+In this case the two prediction does not follows closely as before, where the red indicates summation and blue indicates the multiplying kernel. Air temperature seems to peak at around 13:00 around 18 degrees celsius and drops down to 12 degrees celsius at night for the multiplying kernel, which seems to be a logic value for this time of the year. However the summation kernel peaks at 8.5 degrees celsius which does not seems reasonable for that time of the year. 
+
+
+The reason behind this may be that the summation kernel are independent of each other due to the addition of each kernel, and does not affect the final kernel that is used to predict the air temperature. In comparison when the multiplying each kernel they will affect each other and to get a better estimate over all due to the kernels being combined.  
+
+
+\newpage
+
+
+Lastly, all of the Gaussian kernels are visualized with their selected $h$ from distance 0 to their maximum distance in the data. Here one can see how the smoothing parameter $h$ gives more weights to observations with small distances and lower weights to observations with distances that are far away.
+
+```{r,fig.cap="Gaussian kernels with different h and distances"}
+
+par(mfrow=c(1,3))
+curve(gaussian_kernel(x,h=h_distance),from = 0,to=max(st2$spatial_distance),
+      xlab="Physical distance")
+curve(gaussian_kernel(x,h=h_time),from = 0,to=12, xlab="Time distance") 
+curve(gaussian_kernel(x,h=h_date),from = 0,to=183, xlab="Day distance")
+```
+
+
+

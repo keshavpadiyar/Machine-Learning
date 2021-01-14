@@ -1,0 +1,227 @@
+---
+title: "Assignment 2"
+---
+# Assignenment 2. Ridge regression and model selection
+
+## 1
+
+Assuming that motor_UPDRS is normally distributed and can be modeled by Ridge regression of the voice characteristics, write down the probabilistic model as a Bayesian model.
+
+
+A probabilistic Bayesian model where $\boldsymbol{y}$ and $\boldsymbol{w}$ is normally distributed as:
+$$
+\begin{array}{c}
+y \sim N\left(\boldsymbol{y} \mid \boldsymbol{Xw}, \sigma^{2} I\right) \\
+w \sim N\left(0, \frac{\sigma^{2}}{\lambda} I\right)
+\end{array}
+$$
+
+The function in later exercises should optimize $\boldsymbol{w}$ and $\sigma$. Then the posterior is proportional to the likelihood times the prior:
+
+$$
+P(\boldsymbol{w},\sigma \mid \text {D}) \propto P(D \mid \boldsymbol{w},\sigma) * P(\boldsymbol{w},\sigma) 
+$$
+And the $\log$ of the expression is then: 
+$$
+\log P(\boldsymbol{w},\sigma \mid \text {D}) \propto \log P(D \mid \boldsymbol{w},\sigma) + \log P(\boldsymbol{w},\sigma)
+$$
+The likelihood can be written as: 
+$$
+P(D \mid \boldsymbol{w}, \sigma) = 
+\left(2 \pi \sigma^{2}\right)^{-n / 2} \exp \left(-\frac{1}{2 \sigma^{2}}(\mathbf{y}-\mathbf{X} \boldsymbol{w})^{\mathrm{T}}(\mathbf{y}-\mathbf{X} \boldsymbol{w})\right)
+$$
+Where the log-likelihood can be written as: 
+$$
+\log P(D \mid \boldsymbol{w}, \sigma) = -\frac{n}{2} \ln \left(2 \pi\sigma^{2}\right)-\frac{1}{2 \sigma^{2}}(\mathbf{y}-\mathbf{X} \boldsymbol{w})^{\top}(\mathbf{y}-\mathbf{X} \boldsymbol{w})
+$$
+
+The prior of that also resemble the penalty of a ridge regression can be written as:
+$$
+P(\boldsymbol{w},\sigma) = C*\exp(-\lambda\frac{(\boldsymbol{w})^T \boldsymbol{w}}{2 \sigma^2})
+$$
+Where the logarithmic form is shown as:
+$$
+\log P(\boldsymbol{w},\sigma) = -\lambda\frac{(\mathbf{w})^T \mathbf{w}}{2 \sigma^2}
+$$
+To obtain a optimizable $\boldsymbol{w}$ and $\sigma$ one can compute by minimizing the whole expression as shown below: 
+$$
+\text{argmin} \log P(\boldsymbol{w},\sigma \mid \text {D}) \propto  \frac{n}{2} \ln \left(2 \pi\sigma^{2}\right)+\frac{1}{2 \sigma^{2}}(\mathbf{y}-\mathbf{X} \boldsymbol{w})^{\top}(\mathbf{y}-\mathbf{X} \boldsymbol{w}) + \lambda\frac{(\boldsymbol{w})^T \boldsymbol{w}}{2 \sigma^2}
+$$
+
+\newpage
+
+## 2
+Scale the data and divide it into training and test data (60/40). Due to this, compute all models without intercept in the following steps.
+
+
+```{r}
+# 2.2
+park <- read.csv("parkinsons.csv")
+park <- park %>% select(-subject.,-age,-sex,-test_time,-total_UPDRS) %>% scale() %>% data.frame()
+set.seed(12345)
+id <- sample(nrow(park), floor(nrow(park)*0.6 ))
+
+train <- park %>% slice(id) 
+test <- park %>% slice(-id)
+
+x_train <- train %>% select(-motor_UPDRS) 
+y_train <- train %>% select(motor_UPDRS)
+
+x_test <- test %>% select(-motor_UPDRS)
+y_test <- test %>% select(motor_UPDRS)
+```
+
+
+## 3
+
+Implement 4 following functions by using basic R commands only:
+
+a) `Loglikelihood` function that for a given parameter vector $\boldsymbol{w}$ and
+dispersion $\sigma$ computes the log-likelihood function $\log P(D|\boldsymbol{w},\sigma)$ the model from step 1 for the training data. 
+
+```{r}
+# 2.3
+#a) 
+Loglikelihood <- function(w,sigma,x,y){
+  n <- nrow(x)
+  x <- as.matrix(x)
+  y <- as.matrix(y)
+  -n/2*log(2*pi*sigma^2) - (t(y - x %*% w) %*% (y - x %*% w))/(2*sigma^2)
+}
+```
+
+\newpage
+b) `Ridge` function that for given vector $\boldsymbol{w}$ scalar $\sigma$ and scalar $\lambda$ uses function from 2a and adds up a Ridge penalty to the minus log-likelihood. 
+
+```{r}
+# 2.3
+# b) 
+
+Ridge <- function(param,lambda,x,y){
+  w <- matrix(param[1:ncol(x)],ncol=1)
+  sigma <- param[ncol(x)+1]
+  -Loglikelihood(w=w,sigma=sigma,x,y) + lambda * t(w) %*% w/(2*sigma^2) 
+}
+
+```
+
+c) `RidgeOpt` function that depends on scalar $\lambda$ , uses function from 2b and function `optim()` with method=”BFGS” to find the optimal $\boldsymbol{w}$ and $\sigma$ for the given $\lambda$.
+
+```{r}
+# 2.3
+# c) 
+RidgeOpt <- function(lambda,x,y){
+  
+result <- optim(par=c(rnorm(ncol(x)),1),
+        fn = Ridge,
+        lambda=lambda,
+        y=y,x=x,
+        method="BFGS")
+  
+list(w = result$par[1:ncol(x)], sigma = result$par[ncol(x)+1])  
+  
+}
+```
+
+
+d) 
+`DF` function that for a given scalar $\lambda$ computes the degrees of freedom of the regression model from step 1 based on the training data.
+$$
+DF= \operatorname{tr}\left[\mathbf{X}\left(\mathbf{X}^{\top} \mathbf{X}+\lambda \mathbf{I}_{p p}\right)^{-1} \mathbf{X}^{\top}\right]
+$$
+
+```{r}
+# 2.3
+# d)
+DF <- function(lambda,x){
+x<- as.matrix(x)
+sum(diag(x %*% solve(t(x)%*%x + lambda*diag(ncol(x))) %*% t(x)))
+}
+```
+
+\newpage 
+
+## 4 
+By using function RidgeOpt, compute optimal w parameters for $\lambda = 1$, $\lambda = 100$ and $\lambda = 1000$.
+Use the estimated parameters to predict the motor_UPDRS values for training and test data and report the training and test MSE values. 
+
+```{r}
+# 2.4
+set.seed(12345)
+l1 <- RidgeOpt(lambda = 1,x=x_train,y=y_train)
+set.seed(12345)
+l2 <- RidgeOpt(lambda = 100,x=x_train,y=y_train)
+set.seed(12345)
+l3 <- RidgeOpt(lambda = 1000,x=x_train,y=y_train)
+
+MSE <- function(y_train,x_train,y_test,x_test,l){
+
+y_hat_train<- as.matrix(x_train) %*%  matrix(l$w,ncol=1)
+mse_train <- mean((y_train[,1] - y_hat_train)^2)
+
+y_hat_test<- as.matrix(x_test) %*%  matrix(l$w,ncol=1)
+mse_test <- mean((y_test[,1] - y_hat_test)^2)
+
+return(data.frame(MSE_train=mse_train, MSE_test=mse_test))
+}
+
+```
+
+
+```{r,echo=FALSE}
+knitr::kable(
+data.frame(Lambda=c(1,100,1000),rbind(
+MSE(y_train=y_train,x_train = x_train,
+    y_test = y_test, x_test =  x_test, l=l1),
+MSE(y_train=y_train,x_train = x_train,
+    y_test = y_test, x_test =  x_test, l=l2),
+MSE(y_train=y_train,x_train = x_train,
+    y_test = y_test, x_test =  x_test, l=l3))))
+```
+
+**Which penalty parameter is most appropriate among the selected ones?**
+
+From the table above one can conclude that the mean square of error for the test data with $\lambda=100$ is the lowest, this indicates that this would be the most appropriate values of $\lambda$ among the 1, 100 and 1000. The mean square of error for the test data seems to increase when reaching $\lambda=1000$ which would indicate that the regularization have gone too far.
+
+**Why is MSE a more appropriate measure here than other empirical risk functions?**
+
+The goal is to minimize the true risk of the distribution, the random drawn observation from whole the data set is divided into training and test data. Mean squared error is appropriate due to the fact that one can measure the empirical risk by training the model that is using training data, hence minimizing the given loss function or with other words minimizing the empirical risk. In the same time regularization with ridge penalty is done to avoid overfitting. One can then later investigate how the computed parameters from the training data are preforming on unseen observations (test data) to see if overfitting or underfitting is occurring.
+
+
+\newpage
+
+## 5 
+Use functions from step 3 to compute AIC (Akaike Information Criterion) scores for the Ridge models with values $\lambda = 1$, $\lambda = 100$ and $\lambda = 1000$ and their corresponding optimal parameters $\boldsymbol{w}$ and $\sigma$ computed in step 4. 
+
+
+$$
+A I C = \log \operatorname{likelihood}(D)+2 d f(\text {model})
+$$
+
+```{r}
+# 2.5
+AIC1 <- -2*Loglikelihood(w=l1$w,sigma=l1$sigma,x=park[,-1],y=park[,1]) + 2*DF(x=x_train,lambda=1)
+
+AIC100 <- -2*Loglikelihood(w=l2$w,sigma=l2$sigma,x=park[,-1],y=park[,1]) + 2*DF(x=x_train,lambda=100)
+
+AIC1000 <- -2*Loglikelihood(w=l3$w,sigma=l3$sigma,x=park[,-1],y=park[,1]) + 2*DF(x=x_train,lambda=1000)
+
+
+
+
+```
+
+```{r,echo=FALSE}
+knitr::kable(data.frame(Lambda=c(1,100,1000),AIC=c(AIC1,AIC100,AIC1000)))
+```
+
+
+**What is the optimal model according to AIC criterion?**
+
+The optimal model with $\lambda = 100$ is given by the lowest value of AIC. 
+
+
+**What is the theoretical advantage of this kind of model selection compared to the holdout model selection done in step 4?**
+
+It's due to the fact that the AIC measures the loss of the log-likelihood of the whole data set, instead of diving the data into parts and comping the loss function afterwards. The AIC chooses the model that explains the most of the variation at the same time as minimizing the penalty.
+

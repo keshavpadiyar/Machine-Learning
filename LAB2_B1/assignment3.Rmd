@@ -1,0 +1,196 @@
+---
+title: "Assignment 3"
+output: pdf_document
+---
+
+# 1. Principal components for crime level analysis
+
+## 1.
+
+**Scale all variables except of ViolentCrimesPerPop and implement PCA by using function eigen(). **
+
+```{r,echo=FALSE,include=FALSE}
+#3.1
+library("dplyr")
+library("ggplot2")
+
+theme_set(theme_bw())
+theme_update(plot.title = element_text(size=16,face="bold",hjust = 0.5),
+             axis.text = element_text(size=10,colour="black"),
+             axis.title = element_text(size=15),
+             legend.title = element_text(size=15)) 
+```
+
+
+```{r}
+#3.1
+com <- read.csv("communities.csv")
+com_scaled<- com %>% select(-ViolentCrimesPerPop) %>% scale() %>% data.frame()
+e <- eigen(cov(com_scaled)) 
+M <- which(cumsum(e$values/sum(e$values))>=0.95)[1]
+```
+
+```{r,echo=FALSE}
+#3.1
+ggplot() + geom_point(aes(x=1:100, y=cumsum(e$values/sum(e$values))), color="orange") +
+geom_hline(yintercept=0.95,color="red",linetype="dashed") +
+labs(title="Proportion of variation", x="Number of PC", y="Proportion of variation")
+
+# What is the proportion of variation explained by each of the first two principal components?
+(e$values[1] + e$values[2])/sum(e$values) # ~42%
+```
+
+
+
+
+
+**Report how many features are needed to obtain at least 95% of variance in the data.**
+
+As seen in the graph with the cumulative proportion of variation above, the number of features needed to achieve at least 95% of the variance in the data are 35. 
+
+
+**What is the proportion of variation explained by each of the first two principal components?**
+
+The two Principal component PC1 and PC2 explains about 42% of the variation of the data set. 
+
+\newpage 
+
+## 2 
+
+**Repeat PCA analysis by using princomp() function and make the score plot of the first principle component. Do many features have a notable contribution to this component? Report which 5 features contribute mostly (by the absolute value) to the first principle component.**
+
+```{r}
+#3.2
+#res <- prcomp(com_scaled) # obs! need to use princomp not prcomp!
+#U <- res$rotation
+res <- princomp(com_scaled)
+U <- res$loadings
+colnames(res$scores) <- paste("PC",1:100,sep="") # renaming column for quick fix
+
+```
+
+```{r,echo=FALSE}
+#3.2
+ggplot() + geom_point(aes(y=(U[,1]),x=1:100), color="orange")  + labs(title="PC1 vs Features", x="Features", y="PC1")
+
+
+knitr::kable( sort(abs(U[,1]),decreasing = TRUE )[1:5])
+
+```
+From the graph above the first principal component is visualized against the features reviling no pattern, but some clusters is identified such as income results in a high absolute score on PC1, but also a cluster with a lower score on PC1 that contains features regarding information about the communities such as $PctSameCity85$ and $PctUsePubTrans$ etc.
+
+From the table one can see that the 5 features with most contribution are $medFamInc$, $medIncome$, $PctKids2Par$, $pctWInvInc$ and $PctPopUnderPov$. 
+
+The definition of each feature is :
+
+* medFamInc: median family income
+* medIncome: median household income
+* PctKids2Par: percentage of kids in family housing with two parents 
+* pctWInvInc: percentage of households with investment / rent income in 1989
+* PctPopUnderPov: percentage of people under the poverty level 
+
+Four out of five of the features seems to be connected to income or the economic welfare of the household. This would indicate that low income communities tends to have a large impact the violent crimes per population. The one feature not directly connected to income is the percentage of kids in family housing with two parents. The feature that contains percentage of people under the poverty level seems to be the only principal component that has a positive score of the five most contribution features.
+
+
+**Comment whether these features have anything in common and whether they may have a logical relationship to the crime level.**
+
+Most of the variables are connected to the income of the communities which is one of the key factor in a societies welfare. 
+
+
+
+
+Also provide a plot of the PC scores in the coordinates (PC1, PC2) in which the color of the points is given by ViolentCrimesPerPop.
+
+```{r,echo=FALSE}
+#3.2
+PCA_data <- data.frame(res$scores,ViolentCrimesPerPop=com$ViolentCrimesPerPop)
+ggplot(PCA_data) + geom_point(aes(x=PC1,y=PC2,color=cut_interval(ViolentCrimesPerPop,3)), alpha=0.5) + labs(title="PC2 vs PC1 \n colored by Violent Crimes Per Pop", x="PC1", y="PC2", color="ViolentCrimesPerPop") + scale_color_manual(values=c("dark green","orange","dark red"))
+```
+The graph above visualizes the two principal component that explains 42% of the variation where the target variable *ViolentCrimesPerPop* is divided into three intervals and is displayed with color. One can identify communities with high level of violent crimes per population with high positive values on PC1 with a large spread throughout PC2.
+
+\newpage
+
+## 3
+
+Assume a second order polynomial regression model in which ViolentCrimesPerPop is target and PC1 is the feature. Compute this model using lm() function (hint: use poly() function within the formula), make a scatterplot of the target versus the feature and present also the predicted values in this plot.
+
+```{r}
+#3.2
+model <- lm(ViolentCrimesPerPop~poly(PC1,degree=2),PCA_data)
+
+pred <- predict(model)
+ggplot(PCA_data) + geom_point(aes(x=PC1,y=ViolentCrimesPerPop),alpha=0.7, color="orange") +
+geom_point(aes(x=PC1,y=pred),alpha=0.5,color="dark red") +
+labs(title="ViolentCrimesPerPop vs PC1 \n with fitted prediction")
+```
+
+**Can the target be well explained by this feature?**
+According to the model $R^2$ value the PC1 explains ~45% of the variation in target value of ViolentCrimesPerPop.
+
+**Does the model seem to capture the connection between the target and the feature?**
+In general from the previous plot one can draw the conclusion that higher value PC1 in a community leads to higher value of violent crimes per population. Due to the large variation throughout the target value and the features the polynomial fail to cover a lot observations that has lower values PC1 that is still contains high values of the target.
+\newpage
+## 4
+Use parametric bootstrap to estimate the confidence and prediction bands from the model from step 3 and add these bands into the plot from step 3. 
+What can be concluded by looking at a) **confidence intervals?** b) **prediction intervals?**
+```{r}
+#3.4
+library("boot")
+data2 <- PCA_data[order(PCA_data$PC1),]
+fit <- lm(ViolentCrimesPerPop~poly(PC1,degree=2),data2)
+rng = function(data,model){
+n <- nrow(data)
+data1<- data.frame(ViolentCrimesPerPop=data$ViolentCrimesPerPop,PC1=data$PC1)
+data1$ViolentCrimesPerPop <- rnorm(n,predict(model, newdata=data1),sd(model$residuals))
+return(data1)}
+
+
+f1=function(data1){
+res=lm(ViolentCrimesPerPop~poly(PC1,degree=2),data1)
+ViolentCrimesPerPopP=predict(res,newdata=data2)  ## ... global variable?
+return(ViolentCrimesPerPopP)}
+resy <- boot(data2, statistic=f1, R=2000, mle = fit,ran.gen=rng  , sim="parametric")
+es <- envelope(resy)
+
+
+```
+
+```{r,echo=FALSE}
+# 3.4 
+ggplot(data2) + geom_point(aes(x=PC1, y=ViolentCrimesPerPop), color="orange") + 
+                geom_line(aes(x=PC1, y= es$point[1,]),color="blue") + 
+                geom_line(aes(x=PC1, y= es$point[2,]),color="blue") + 
+                geom_line(aes(x=PC1, y= predict(fit)), color="dark red") + labs(title="ViolentCrimesPerPop vs PC1 \n Confidence bands") + labs(title="ViolentCrimesPerPop vs PC1 \n Confidence bands")
+```
+
+According to the plot above it's concluded that that confidence interval with 95% certainty will contain the true mean of the population.
+
+
+
+```{r,message=FALSE,warning=FALSE}
+# 3.4
+
+f2=function(data1){
+res=lm(ViolentCrimesPerPop~poly(PC1,degree=2),data1)
+ViolentCrimesPerPopP=predict(res,newdata=data2)
+n=length(data2$ViolentCrimesPerPop)
+ViolentCrimesPerPopP=rnorm(n,ViolentCrimesPerPopP, sd(fit$residuals))
+return(ViolentCrimesPerPopP)
+}
+
+res=boot(data2, statistic=f2, R=10000, mle=  fit,ran.gen=rng, sim="parametric")
+es <- envelope(res)
+```
+
+```{r,echo=FALSE,message=FALSE,warning=FALSE}
+# 3.4
+ggplot(data2) + geom_point(aes(x=PC1, y=ViolentCrimesPerPop), color="orange") + 
+                geom_line(aes(x=PC1, y= es$point[1,]),color="blue") + 
+                geom_line(aes(x=PC1, y= es$point[2,]),color="blue") + 
+                geom_line(aes(x=PC1, y= predict(fit)), color="dark red") + ylim(c(0,1)) + labs(title="ViolentCrimesPerPop vs PC1 \n Prediction bands")
+
+```
+
+As can be seen in the plot above the prediction bands seems to have a larger interval compared to the confidence interval from the previous plot. This is due to the fact the prediction interval reveals where one can expect to observe a new data point if sampled, giving the interpretation that 95% of the new data points will be within the interval. 
+
+

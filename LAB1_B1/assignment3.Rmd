@@ -1,0 +1,271 @@
+---
+title: "Assignment 3"
+---
+
+# Assignment 3 - Linear Regression and LASSO
+
+```{r setup2, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+#setwd(dir = "C:/Users/Henrik Olofsson/Dropbox/732A99 Machine Learning/Lab 1-1/")
+
+library(dplyr)
+library(ggplot2)
+
+# Reading data
+tecator <- read.csv(file = "tecator.csv", row.names = "Sample")
+
+# Splitting into test and train (50/50)
+n <- dim(tecator)[1]
+set.seed(12345)
+id <- sample(1:n, floor(n*0.5))
+train <- tecator[id, ]
+test <- tecator[-id, ]
+
+train <- dplyr::select(train, -c("Protein", "Moisture"))
+test <- dplyr::select(test, -c("Protein", "Moisture"))
+
+train <- as.data.frame(cbind(scale(train[,1:ncol(train)-1]), "Fat" = train[,ncol(train)]))
+test <- as.data.frame(cbind(scale(test[,1:ncol(test)-1]), "Fat" = test[,ncol(test)]))
+
+
+```
+
+
+
+## 1
+
+**Modeling fat content of meat using lasso**
+In this assignment we are trying to use absorbance data to predict the Fat content in meat. We initially assume that Fat can be modeled as a linear regression where absorance on 100 different channels are used as features. The underlying probabilistic model can be expressed as:
+
+$$ p(y|\bm{x},w, \sigma^2) \sim N(w^T\bm{x}, \sigma^2) = \frac{1}{\sqrt{2\pi\sigma}} \exp -\frac{{(y-{w^T\bm{x}}})^2}{2\sigma^2} $$
+
+which then can be estimated using a maximum likelihood estimate. Here, $\bm{x}$ are the absorbance channels 1-100 and $w$ their respective parameters to be estimated.
+
+To report error rates throughout the report, the root mean squared error (RMSE) is used, defined as:
+
+$$ RMSE(Y,\hat{Y})=\sqrt{\frac{1}{N}\sum_{i=1}^N({Y_i-\hat{Y}_i})^2} $$
+ 
+It is worth noting that the features are highly correlated, signalling multicollinearity might be a problem. As we now also have more features than observations, the linear regression model will probably not perform very well. Both features and target exhibit a skewness to the left. 
+
+``` {r descriptives, echo = FALSE, message = FALSE, fig.height = 3, fig.width = 4, fig.align = "center"}
+# 3
+GGally::ggpairs(train[, c(1, 40, 80, 101)])
+```
+
+**Fitting linear regression**
+The data has been split into test and training sets (50/50) and standarized and then a linear regression model has been fitted.
+
+``` {r assignment_3_1_1, echo = FALSE}
+# 3.1
+lm_mod <- lm(formula = Fat~., data = train)
+lm_pred <- predict(lm_mod, newdata = test)
+```
+
+The RMSE of the training data:
+``` {r assignment_3_1_2, echo = FALSE}
+# 3.1
+
+# Error (RMSE) of training data
+sqrt(sum((train$Fat-as.vector(lm_mod$fitted.values))^2) / nrow(train))
+```
+
+The RMSE of the test data:
+``` {r assignment_3_1_3, echo = FALSE}
+# 3.1
+
+# Error (RMSE) of test set
+sqrt(sum((test$Fat-as.vector(lm_pred))^2) / length(lm_pred))
+
+```
+Errors are extremely low for the training set and much higher the test set, indicating that the model is highly overfitted on the training data. The most evident cause of this is that there are more parameters than observations and that the features are highly correlated. *See appendix for code to plot training, test and target values.*
+
+``` {r assignment_3_1_4, include = FALSE}
+# 3.1
+
+# Plot of training, test and original target values.
+# Target values have been shifted slightly to make it possible to distinguish them
+# from the predicted values from the training data.
+p <- ggplot(data = as.data.frame(lm_pred)) +
+  geom_point(aes(1:length(lm_pred), lm_pred)) +
+  geom_point(
+    data = as.data.frame(lm_mod$fitted.values),
+    aes(1:length(lm_mod$fitted.values), lm_mod$fitted.values),
+    colour = "purple"
+  ) +
+  geom_point(data = as.data.frame(train$Fat),
+             aes(1:nrow(train), train$Fat + 2.5),
+             colour = "pink")
+p
+
+```
+
+## 2 
+The objective function that should be optimized is (see Hastie et al.):
+
+$$ \hat w^{lasso} = argmin \left\{\frac{1}{2} \sum_{i=1}^N(y_i - w_0 - \sum_{j=1}^p w_jx_{ij})^2 +\lambda\sum_{j=1}^p|w_j| \right\} $$
+
+## 3
+
+**Fitting the lasso**
+After fitting a lasso regression model using glmnet with an alpha-setting of 1, we can produce the following plot which shows how the coefficients vary with different levels of log lambda. The higher the penalty factor, the fewer coefficients that are non-zero. Should we want only three predictors, we can choose a log lambda corresponding to a region where there are only three non-zero coefficients (approx [-0.43,-0.13]). Interestingly, coefficients tend to go to zero and then reappear as another coefficient is eliminated. This supports our earlier finding that the multicollinearity is prominent. The variance inflation factor could be calculated to determine the severity of the problem.
+
+``` {r assignment_3_3, echo = FALSE, fig.height = 3.5, fig.width = 5, fig.align = "center"}
+# 3.3
+
+# splitting features and target
+x_train <- as.matrix(dplyr::select(train, -c("Fat")))
+y_train <- train$"Fat"
+
+# fitting lasso
+lasso <- glmnet::glmnet(x = x_train, y = y_train, alpha = 1)
+
+# plotting coefficients
+plot(lasso, xvar = "lambda", lwd = 2, label = TRUE)
+abline(v = -.34, col = "darkgray", lty = 3)
+abline(v = -.13, col = "darkgray", lty = 3)
+```
+
+## 4
+**Degrees of Freedom**
+The plot below shows how the degrees of freedom decreases with higher values of the regularization parameter lambda. This coincides with the number of non-zero coefficients being an exact unbiased estimate of the degrees of freedom, i.e. higher lambda means fewer non-zero components and therefore a lower degrees of freedom. The definition of the degrees of freedom should you wish to calculate it is: $df(\hat{y})=\frac{1}{\sigma^2}\sum_{i=1}^N{Cov(\hat{y}_i,y_i})$
+
+``` {r assignment_3_4, echo = FALSE, fig.height = 3.5, fig.width = 5, fig.align = "center"}
+# 3.4
+loglambda <- log(lasso$lambda)
+plot(loglambda, lasso$df, type = "l", lwd = 2, ylab = "Degrees of Freedom", xlab = "log(lambda)")
+
+```
+
+## 5 
+
+**Fitting ridge model**
+Repeating step 3 but with ridge regression gives a very different result: 
+
+``` {r assignment_3_5, echo = FALSE, fig.height = 3.5, fig.width = 5, fig.align = "center"}
+# 3.5
+ridge <- glmnet::glmnet(x = x_train, y = y_train, alpha = 0)
+plot(ridge, xvar = "lambda", lwd = 2)
+
+```
+
+It seems the ridge regression, unlike lasso, does not shrink any coefficients to zero. We are in other words left with the same number of features.
+
+## 6
+**Cross-validation**
+Here, cross-validation is used to find the optimal lasso model. See how the error increases when a too high log-lambda is used.
+
+``` {r assignment_3_6_1, echo = FALSE, fig.height = 4, fig.width = 5, fig.align = "center"}
+# 3.6
+
+# cross-validation
+set.seed(12345)
+crossval <- glmnet::cv.glmnet(x = x_train, y = y_train)
+
+plot(crossval)
+
+```
+
+It can be determined from the plot above that the optimal value (left line) is not statistically significantly better than log lambda of -2 by looking as the error bars just so slightly overlaps. One could also extract the standard errors and intervals from the cross-validation object itself and make the calculations.
+
+``` {r assignment_3_6_2}
+# 3.6 - number of non-zero coefficients in optimal model
+crossval$nzero[match(crossval$lambda.min, crossval$lambda)]
+
+# minimum log lambda
+log(crossval$lambda.min)
+
+# one standard error from the minimum log lambda
+log(crossval$lambda.1se)
+```
+
+The optimal number of parameters are nine, plus the intercept. See the selected model below:
+
+``` {r assignment_3_6_3, echo = FALSE, message = FALSE}
+# 3.6 - optimal model
+temp <- coef(crossval, s="lambda.min")
+coefs <- as.matrix(round(temp[temp != 0],3))
+rownames(coefs) <- rownames(temp)[which(as.matrix(temp) != 0)]
+colnames(coefs) <- "Coef."
+coefs
+
+```
+Note that the coefficient for Channel50 is very small, but non-zero.
+
+It is possible to obtain the errors of fitted values for the training data:
+
+``` {r assignment_3_6_4, echo = FALSE}
+# 3.6
+
+# using optimal model to fit data
+m1 <- glmnet::glmnet(x = x_train, y = y_train, lambda = crossval$lambda.min, alpha = 1)
+train_pred<- glmnet::predict.glmnet(m1, newx = x_train, s = "lambda.min")
+```
+
+``` {r assignment_3_6_5}
+# 3.6
+
+# RMSE of the fitted values
+sqrt(sum((y_train-as.vector(train_pred))^2) / length(y_train))
+
+```
+**Optimal model**
+The optimal model used with the test features shows a quite strong linear relationship. Here are the fitted values of the test data plotted against the original target of the test data:
+
+``` {r assignment_3_6_6, echo = FALSE, fig.height = 3.5, fig.width = 5, fig.align = "center"}
+# 3.6
+
+# splitting 
+x_test <- as.matrix(dplyr::select(test, -c("Fat")))
+y_test <- test$Fat
+
+lasso_test <- glmnet::predict.glmnet(m1, newx = x_test)
+
+df <- data.frame("test" = y_test, "pred" = as.vector(lasso_test))
+
+ggplot(data = df, aes(x = test, y = pred)) +
+  geom_point()
+
+```
+
+The error of the test set is given below. The difference from the error of the training data is marginal, which indicates that the model is not overfitted. 
+
+``` {r assignment_3_6_7}
+# 3.6
+
+# Error of test
+sqrt(sum((y_test-as.vector(lasso_test))^2) / length(y_test))
+
+```
+## 7
+
+**Generating new target values**
+Here new data is generated from the feature values of the test data and plotted against the original target values in the test data.
+
+``` {r assignment_3_7_1, echo = FALSE, fig.height = 2.5, fig.width = 3.5, fig.align = "center"}
+# 3.7
+
+# standard deviation of the residuals from the training data
+sigma <- sqrt(var(y_train - as.vector(train_pred)))
+
+# generating new target values using the mean of the feature values
+# and the standard deviation from the training data
+new_target <- rnorm(length(y_test), y_test, sigma)
+
+# plotting
+df2 <- data.frame(y_test, new_target)
+names(df2) <- c("Fat (test data)", "Fat (generated)")
+
+# generated data in red
+ggplot(data = df2, aes(x = y_test, y = new_target)) +
+  geom_point(colour = "red") +
+  geom_point(data = df, aes(x = test, y = pred)) +
+  labs(x = "Original", y = "Predicted/generated")
+
+ggplot(data = df2, aes(x = 1:length(new_target), y = new_target)) +
+  geom_point(colour = "red") +
+  geom_point(data = df, aes(x = 1:length(pred), y = pred)) +
+  labs(x = "Index", y = "Predicted/generated")
+
+```
+Newly generated points are marked in red above. Black dots are the predicted values. The match seems decent, but is not terribly exciting since we have basically used the predicted values and added some noise. 
+

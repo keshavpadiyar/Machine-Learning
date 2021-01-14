@@ -1,0 +1,386 @@
+---
+title: "Assignment 3"
+output: pdf_document
+---
+
+# Assignment 3 - High-dimensional methods
+
+```{r setup2, include=FALSE}
+# Assignment 3 - Setup
+knitr::opts_chunk$set(echo = TRUE)
+
+# Set working directory here
+# setwd(dir = "C:/")
+
+# Dependencies
+library(pamr)
+library(glmnet)
+library(kernlab)
+```
+
+## Background
+In this assignment we are going to use nearest shrunken centroid (NSC) classification method to classify cells as their proper types depending on which genes are expressed in the cells. The data is interesting as the number of features are almost seven times as many as the number of observations (300 x 2086). This is a task where common classification techniques are not appropriate, hence we need to use some regularization, here in the form of the NSC, where the classwise means are shrunk towards the overall mean for each non-significant feature (see Hastie et al. (2001). *The Elements of Statistical Learning*).
+
+The distances from each class mean to the overall mean are standardized by subtracting the overall mean from each class mean and dividing by the pooled within-class standard deviation $s_j$ (with a small correction to protect against extreme values using a small constant $s_0$).
+
+$$ d_{kj}=\frac{\bar{x}_{kj}-\bar{x}_{j}}{m_k(s_j+s_0)}$$
+The shrinkage is done using soft thresholding, that is a shrinkage where a threshold parameter $\Delta$ is subtracted from each of the (absolute) values. This parameter can be selected using cross-validation. The resulting values that are negative are set to zero.
+
+$$d^\prime_{kj}=\textrm{sign}(d_{kj})(|d_{kj}|-\Delta)_+$$
+
+To attain the new shrunken class centroids the following calculation is made:
+
+$$\bar{x}^\prime_{kj}=\bar{x}_j+m_k(s_j+s_0)d^\prime_{kj}$$
+These new values can then be used by a linear discriminant. As we use a threshold, some features may be set to zero and discarded, much like in the lasso, resulting in a simpler model.
+
+
+## 1. Nearest Shrunken Centroid Classification using Cross-Validation
+We are supposed to do NSC classification of the gene data. Data is first divided into training and test sets with proportions 70/30 without scaling and the model is then trained on the training data using package `pamr`.
+
+```{r data ingestion, include=FALSE}
+# Assignment 3 - Part 1
+# Reading data from file and making initial data prep
+genes0 <- read.csv("geneexp.csv", row.names = "X", stringsAsFactors = TRUE)
+genes <- as.data.frame(genes0[,1:ncol(genes0)-1])
+genes[is.nan(as.matrix(genes))] <- 0
+
+# Setting cell type as factor
+genes <- as.data.frame(cbind("CellType" = genes0$CellType, genes))
+
+# Data partioning into train and test
+n=dim(genes)[1]
+set.seed(12345)
+id=sample(1:n, floor(n*0.7))
+train=genes[id,]
+test=genes[-id,]
+
+# Splitting target and features for training set
+x_train <- t(train[,2:ncol(train)])
+y_train <- train[, 1]
+
+# Splitting target and features for test set
+x_test <- t(test[,2:ncol(test)])
+y_test <- test[, 1]
+
+# Making lists of data to use with pamr package
+training_data <- list("x" = x_train,
+                      "y" = y_train,
+                      geneid = as.character(1:nrow(x_train)),
+                      genenames = rownames(x_train))
+
+test_data <- list("x" = x_test,
+                  "y" = y_test,
+                  geneid = as.character(1:nrow(x_test)),
+                  genenames = rownames(x_test))
+
+```
+
+```{r nsc training, results = FALSE, include = FALSE}
+# Training NSC model
+m1 <- pamr.train(data = training_data)
+
+# Using cross-validation to find optimal model parameter
+# Also timing the time taken to run the operation for later comparison
+ptime <- proc.time()
+set.seed(12345)
+m2 <- pamr.cv(m1, training_data)
+ptime_nsc <- proc.time()-ptime
+
+```
+
+**Threshold and Classification Error**
+The optimal value of the threshold is either 7.213 or 8.816 (both give the same number of errors). As less shrinkage could be argued to be less complex (the model is less sensitive), we have decided to use the former value for the threshold. In the output below one can see how the number of non-zero features are decreasing as the threshold value increases. The number of misclassifications seem to reduce a first, but then increase heavily as only a few features remain.
+
+\newpage
+
+```{r nsc cv, echo = FALSE, comment = NA, message = TRUE}
+# The by cross-validation process for the threshold value
+message(print(m2))
+```
+\newpage
+
+**Visual Inspection of Errors**
+Inspecting the error rate and threshold visually reveals that it is the CD8 cell type that seems to be misclassified more often as the threshold increases.
+
+
+```{r nsc cv plot, echo = FALSE, fig.height = 7, fig.width = 5, fig.align = "center"}
+# Plotting the cross-validation data
+pamr.plotcv(m2)
+
+```
+
+\newpage
+
+**Centroid Plot**
+The centroid plot below shows how, for each cell type, the gene expression differs between each cell type's centroid and the overall centroid or the average expression. This means that not all cell type can have a positive (or negative) expression. The plot shows all the genes that survived the shrinkage, 25 in this case. "Surviving" in this case means that for at least one of the cell types, the shrunken centroid is non-zero. The CD19 cells are markedly different from the CD4 and CD8 cells, indicating the difference between these cells are greater. 
+
+```{r nsc centroid plot, echo = FALSE, fig.height = 6, fig.width = 7, fig.align="left"}
+# Finding the threshold that minimises error
+min_cv <- m2$threshold[which.min(m2$error)]
+
+# Centroid plot for optimal model
+par(cex = 1.5)
+pamr.plotcen(m1, training_data, threshold = min_cv)
+
+```
+
+\newpage
+
+**Surviving Genes**
+Below are the genes that survive the shrinkage, presented in a table format.
+
+
+```{r nsc surviving genes, message = FALSE, echo = FALSE, comment = NA, message = TRUE}
+# Listing the surviving genes
+message(pamr.listgenes(m1, training_data, threshold = min_cv, genenames = TRUE))
+
+```
+
+
+## 2. Most Contributing Genes
+The two most contributing genes are given at the top of the previous table. These are, together with their synonyms:
+
+- ENSG00000019582 - CD74/DHLAG
+
+- ENSG00000204287 - HLA-DRA1
+
+Both of these genes seem to appear in immune system cells according to https://panglaodb.se/markers.html (both B and T cells are lymphocytes).
+
+**Test Error of NSC Model**
+The confusion matrix and calculated error for the test set are presented below.
+
+```{r nsc error metrics, echo = FALSE, comment = NA, message = TRUE}
+# Assignment 3 - Part 2
+# Predicting for test data using our trained model
+m2_pred <- pamr.predict(m1, newx = x_test, threshold = min_cv)
+
+# Creating confusion matrix for the true/predicted values
+m2_err <- table("True" = y_test, "Predicted" = m2_pred)
+message("NSC Confusion Matrix:")
+m2_err
+
+# Finding the error
+NSC <- (sum(m2_err)-(sum(diag(m2_err))))/sum(m2_err)
+message("NSC Error:")
+message(round(NSC,3))
+
+# Number of contributing features
+nfeat_nsc <- m2$size[which.min(m2$error)]
+message("Number of non-zero parameters:")
+message(nfeat_nsc)
+
+```
+
+## 3. Elastic Net and Support Vector Machines
+
+**Elastic Net**
+The elastic net technique combines L1 and L2 regularization, allowing for feature parameters to be reduced to zero. Here we are using elastic net with multinomial response and $\alpha = 0.5$. The penalty factor $\lambda$ is selected through cross-validation. Package `glmnet` was used for model fitting with training data and prediction with test data.
+
+```{r enet training and error, echo = FALSE, comment = NA, message = TRUE}
+# Assignment 3 - Part 3
+# Elastic net training (and timing the operation)
+ptime <- proc.time()
+m3 <- cv.glmnet(t(x_train), y_train, family = "multinomial", alpha = 0.5)
+ptime_enet <- proc.time()-ptime
+
+# Making predictions using test data
+m3_pred <- predict(m3, newx = t(x_test), s = "lambda.min", type = "class")
+
+# Creating confusion matrix for the true/predicted values
+m3_err <- table("True" = y_test, "Predicted" = m3_pred)
+message("Elastic Net Confusion Matrix:")
+m3_err
+
+# Finding the error
+elastic_net <- (sum(m3_err)-(sum(diag(m3_err))))/sum(m3_err)
+message("Elastic Net Error:")
+message(round(elastic_net,3))
+
+# Number of contributing features
+nfeat_enet <- m3$nzero[match(m3$lambda.min, m3$lambda)][[1]]
+message("Number of non-zero parameters:")
+message(nfeat_enet)
+
+```
+
+**Support Vector Machine**
+Here we are using support vector machines (SVM) to do the same classification task. SVM's can be used for both linear and non-linear classification, the latter by using the "kernel trick". In short, the SVM fits a decision boundary as a hyperplane to maximize the margin between classes. In this case we will be using the vanilladot kernel (linear) from the `ksvm` function from the package of the same name.
+
+```{r svm training and error metrics, warning = FALSE, echo = FALSE, comment = NA, message = TRUE}
+# SVM training (and timing the operation)
+ptime <- proc.time()
+m4 <- ksvm(x = t(x_train), y = y_train, kernel = "vanilladot")
+ptime_svm <- proc.time()-ptime
+
+# Making predictions using test data
+m4_pred <- predict(m4, newdata = t(x_test))
+
+# Creating confusion matrix for the true/predicted values
+m4_err <- table("True" = y_test, "Predicted" = m4_pred)
+message("SVM Confusion Matrix:")
+m4_err
+
+# Finding the error
+SVM <- (sum(m4_err)-(sum(diag(m4_err))))/sum(m4_err)
+message("SVM Error:")
+message(round(SVM, 3))
+
+# Number of support vectors
+nfeat_svm <- m4@nSV
+message("Number of support vectors:")
+message(nfeat_svm)
+
+```
+
+**Model Comparison**
+From the table below we can see that the best method regarding the error rate is SVM, but it also seems to be more complex with more support vectors used than the number of non-zero features in the other methods. Elastic net is the middle option here with a reasonable misclassification rate and a manageable number of features. When considering the time taken to run the different methods, the SVM comes out on top. Altogether the SVM seems to be the a great selection in this case.
+
+```{r model comparison, warning = FALSE, echo = FALSE, comment = NA}
+# Creating table to compare the models on classification error
+# number of features and time to run the training
+data.frame(
+  "Error" = round(rbind(NSC, "Elastic net" = elastic_net, SVM), 3),
+  "Features" = rbind(nfeat_nsc, nfeat_enet, nfeat_svm),
+  "Runtime" = rbind(ptime_nsc[[3]], ptime_enet[[3]], ptime_svm[[3]])
+)
+
+```
+
+\newpage
+
+## 4. Benjamini-Hochberg method
+
+For the final part of the assignment, we are going to use the Benjamini-Hochberg (BH) method to test each cell type against all others using all the features at hand (here we use t-tests). This should allow us to find the features that can discriminate well. The BH method allows us to fix a desired false discovery rate (FDR), denoted $\alpha$, and utilise that it has been shown that the true FDR is smaller than $\alpha$ given that we order our p-values in ascending order and reject all null hypotheses that have p-values smaller than the BH rejection threshold.
+
+Three plots are presented below, one for each cell type, using $\alpha = 0.05$ The p-values marked in red are those that are low enough to reject their corresponding null hypotheses, i.e. there is a statistically significant difference from the other cell types. It is clear that CD19 gets many more rejected hypotheses than the other types, indicating that it is easier to find features (genes) that can discriminate this cell type well from the others. It is interesting to note that this number of genes are much higher than in our previous attempts with NSC, SVM and elastic net.
+
+```{r benjamini-hochberg, echo = FALSE, fig.height = 4, fig.width = 6.5, fig.align = "center"}
+# Assignment 3 - Part 4
+
+# Copy of original data
+bh <- genes
+
+# This part of the code creates a number of formula objects
+# that are then input into the t.test function
+# First we do one-hot encoding of the cell types
+dummy <- model.matrix(~0+bh$CellType)
+
+# Setting proper column names for the new columns...
+colnames(dummy) <- c("CD19", "CD4", "CD8")
+
+# ...and binding them to the gene data
+bh <- cbind(dummy, bh)
+
+# Making sure the dummy variables are treated as factors
+bh[,1:3] <- lapply(bh[,1:3], factor)
+
+# Extracting gene names to loop through
+gene_names <- names(bh)[-(1:4)]
+
+# An object with the three different cell types CD4, CD8 and CD19
+cell_types <- levels(bh$CellType)
+
+# Defining a function that takes a formula and a data object,
+# runs a t-test and returns the p-value
+# This function will be called from another function later
+get_p <- function(form, data = bh) {
+  t.test(formula = form, data = data)$p.value
+}
+
+# Defining the second function that takes as input a vector of gene names,
+# a single cell type and a data object
+p_val <- function(g = gene_names, c = cell_types, data = bh) {
+  
+  # First constructing the formula objects by applying an anonymous function
+  # over the gene name list and storing these
+  formulas <- lapply(g, function(x) {formula(paste(x, "~", c))})
+  
+  # Then applying the get_p function to return a p-value for each formula
+  # object created above
+  # lapply returns a list, so we unlist and sort the result
+  p_val <- sort(unlist(lapply(formulas, get_p)))
+  
+  # Finally returning that vector of p-values
+  return(p_val)
+}
+
+# calling the function for the different cell types
+p_val_CD4 <- p_val(c = "CD4")
+p_val_CD8 <- p_val(c = "CD8")
+p_val_CD19 <- p_val(c = "CD19")
+
+# This is an overly complex looking code to produce a very simple
+# looking plot, don't be scared!
+# Inputs are simply the p-values for a cell type and an optional alpha parameter
+plot_fun <- function(p_val, alpha = 0.05) {
+  
+  # Calculating the BH threshold
+  adj_p <- alpha*(1:length(p_val)/length(p_val))
+  
+  # Indicator for if a hypothesis has been rejected or not
+  sig <- vector(mode = "character", length = length(p_val))
+  sig <- ifelse(p_val < adj_p, "rejected", "not rejected")
+  
+  # Making a data frame of the vectors of p-values and rejection indicator
+  d <- as.data.frame(cbind("p_value" = p_val, "significant" = sig))
+  
+  # Finding the highest value under the threshold
+  max <- which.min(d[,2] == "rejected")
+  
+  # Making a plot with p-values on y axis and index on the x axis
+  # Indicating what cell type is shown by cutting the name of the input data set
+  # -> follow the naming convention!
+  plot(p_val, pch = 20, cex = 0.2, ylab = "p-value", main = substring(substitute(p_val), 7))
+  
+  # Vertical line at the position of the highest rejected hypothesis
+  abline(v = max, lty = "dashed", col = "gray")
+  
+  # The BH threshold line
+  lines(adj_p, lty = "dashed", col = "gray")
+  
+  # Overplotting the rejected values with red for better contrast
+  points(
+    x = 1:length(d[d[, 2] == "rejected", 2]),
+    y = d[d[, 2] == "rejected", 1],
+    col = "red",
+    pch = 20,
+    cex = 0.2
+  )
+  
+  # Adding a single dot on the dashed vertical line
+  points(x = max, y = .9, pch = 20, cex = 0.8)
+  
+  # Adding a text box indicating how many hypotheses are rejected
+  # j is the highest numbered item that falls below the BH threshold
+  text(
+    paste("j =", max),
+    x = max + 3,
+    y = .9,
+    pos = 4,
+    cex = 0.7
+  )
+  
+  # Text box indicating what alpha was used
+  mtext(
+    paste("Alpha =", alpha),
+    side = 3,
+    cex = 0.7,
+    line = 0.1
+  )
+}
+
+# Calling the plot function for different cell types
+plot_fun(p_val_CD4)
+plot_fun(p_val_CD8)
+plot_fun(p_val_CD19)
+
+# Feel free to try a different alpha! :)
+# plot_fun(p_val_CD19, alpha = 0.10)
+
+
+```
+
+```{r cleanup, echo = FALSE, include = FALSE}
+# Cleanup
+rm(list=ls())
+```
